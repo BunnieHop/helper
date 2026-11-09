@@ -1051,8 +1051,6 @@ impl Hub {
           continue;
         }
       }
-      let started = now_ms();
-      self.ledger.record(&pkey, &pace, started, false);
       // Saved before the upload starts, so a crash mid-post is known after a restart (D11).
       self.set_cell(
         hop,
@@ -1061,6 +1059,10 @@ impl Hub {
         json!({ "state": "pending", "inFlight": true }),
       );
       self.stage(hop, &iid, &[d], "uploading", None);
+      // The pace gap runs from the moment the upload starts, after the saves above, so slow
+      // disk writes never shorten the time between two posts on one account.
+      let started = now_ms();
+      self.ledger.record(&pkey, &pace, started, false);
       let post = d.pointer("/options/posts").and_then(|m| m.get(&iid));
       let res = up
         .publish(Upload {
