@@ -1,0 +1,267 @@
+{
+  "format": "bunniehop.sidecar",
+  "version": 1,
+  "source": {
+    "platform": "youtube",
+    "handle": "creator"
+  },
+  "generatedAt": "2026-11-07T12:00:00Z",
+  "items": [
+    {
+      "id": "yt-long-0001",
+      "platform": "youtube",
+      "kind": "video",
+      "url": "https://www.youtube.com/watch?v=yt-long-0001",
+      "title": "How I edit a week of videos in one afternoon (full workflow, every tool, every shortcut I use daily)",
+      "description": "Everything I use to batch-edit a week of uploads in a single afternoon.\n\nGear list: https://example.com/gear?ref=yt and presets at https://example.com/presets\n\nChapters below. Sponsored by nobody. Questions? Reply on https://bsky.app/profile/creator.example\n\n@editorfriend helped with the color grade.\n\n#tag01 #tag02 #tag03 #tag04 #tag05 #tag06 #tag07 #tag08 #tag09 #tag10 #tag11 #tag12 #tag13 #tag14 #tag15 #tag16 #tag17 #tag18 #tag19 #tag20 #tag21 #tag22 #tag23 #tag24 #tag25 #tag26 #tag27 #tag28 #tag29 #tag30 #tag31 #tag32 #tag33 #tag34 #tag35 #tag36 #tag37 #tag38 #tag39 #tag40",
+      "tags": [
+        "editing",
+        "workflow",
+        "premiere pro",
+        "davinci resolve",
+        "batch editing",
+        "youtube tips"
+      ],
+      "category": "27",
+      "language": "en",
+      "publishedAt": "2026-03-14T16:00:00-07:00",
+      "durationSec": 1312,
+      "width": 1920,
+      "height": 1080,
+      "sizeBytes": 2400000000,
+      "visibility": "public",
+      "madeForKids": false,
+      "chapters": [
+        {
+          "startSec": 0,
+          "title": "Intro"
+        },
+        {
+          "startSec": 95,
+          "title": "Ingest"
+        },
+        {
+          "startSec": 610,
+          "title": "Export"
+        }
+      ],
+      "captions": [
+        {
+          "lang": "en",
+          "kind": "manual",
+          "format": "vtt",
+          "path": "captions/en.vtt"
+        }
+      ],
+      "thumbnails": [
+        {
+          "path": "thumb.jpg",
+          "width": 1280,
+          "height": 720
+        }
+      ],
+      "media": [
+        {
+          "kind": "video",
+          "path": "video.mp4",
+          "mime": "video/mp4",
+          "sizeBytes": 2400000000,
+          "width": 1920,
+          "height": 1080,
+          "durationSec": 1312,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "playlists": [
+        "Workflow"
+      ],
+      "stats": {
+        "views": 48210,
+        "likes": 3011,
+        "comments": 214
+      },
+      "comments": [
+        {
+          "author": "viewer1",
+          "text": "The ingest tip saved me an hour",
+          "likes": 88
+        }
+      ],
+      "flags": {
+        "membersOnly": false,
+        "ageRestricted": false,
+        "geoBlocked": false,
+        "live": false,
+        "premiere": false,
+        "upcoming": false,
+        "repost": false,
+        "reply": false,
+        "quote": false,
+        "licensedSound": false,
+        "needsHelperFetch": false,
+        "downscaled": false
+      },
+      "source": {
+        "via": "helper",
+        "detail": "youtube"
+      },
+      "folder": "youtube/creator/2026/2026-03-14_how-i-edit-a-week-of-videos-in-one-afternoon-(full-workflow_yt-long-0001",
+      "files": [
+        {
+          "role": "media",
+          "path": "media.mp4",
+          "sizeBytes": 1024,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "hashes": {
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "backedUpAt": "2026-11-07T12:00:00Z"
+    },
+    {
+      "id": "ig-emoji-0002",
+      "platform": "instagram",
+      "kind": "image",
+      "description": "👩🏽‍💻 shipping day 🚀🚀 family trip 👨‍👩‍👧‍👦 + new flag 🏳️‍🌈 ✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨ ok 👍🏿",
+      "tags": [],
+      "publishedAt": "2025-12-31T23:59:00+01:00",
+      "chapters": [],
+      "captions": [],
+      "thumbnails": [],
+      "media": [
+        {
+          "kind": "image",
+          "path": "p.jpg",
+          "sizeBytes": 3000000,
+          "width": 1080,
+          "height": 1350,
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "playlists": [],
+      "comments": [],
+      "flags": {
+        "membersOnly": false,
+        "ageRestricted": false,
+        "geoBlocked": false,
+        "live": false,
+        "premiere": false,
+        "upcoming": false,
+        "repost": false,
+        "reply": false,
+        "quote": false,
+        "licensedSound": false,
+        "needsHelperFetch": false,
+        "downscaled": false
+      },
+      "source": {
+        "via": "export",
+        "detail": "your_instagram_activity/media/posts_1.json"
+      },
+      "folder": "instagram/creator/2025/2025-12-31_👩🏽‍💻-shipping-day-🚀🚀-family-trip-👨‍👩‍👧‍👦-+-new-flag-🏳️‍🌈-✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨_ig-emoji-0002",
+      "files": [
+        {
+          "role": "media",
+          "path": "media.mp4",
+          "sizeBytes": 1024,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "hashes": {
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "backedUpAt": "2026-11-07T12:00:00Z"
+    },
+    {
+      "id": "bsky-text-0004",
+      "platform": "bluesky",
+      "kind": "text",
+      "description": "Hot take: the best backup is the one you never think about because it runs every night.",
+      "tags": [],
+      "publishedAt": "2025-08-09T12:00:00Z",
+      "chapters": [],
+      "captions": [],
+      "thumbnails": [],
+      "media": [],
+      "playlists": [],
+      "stats": {
+        "likes": 41
+      },
+      "comments": [],
+      "flags": {
+        "membersOnly": false,
+        "ageRestricted": false,
+        "geoBlocked": false,
+        "live": false,
+        "premiere": false,
+        "upcoming": false,
+        "repost": false,
+        "reply": false,
+        "quote": false,
+        "licensedSound": false,
+        "needsHelperFetch": false,
+        "downscaled": false
+      },
+      "folder": "bluesky/creator/2025/2025-08-09_hot-take-the-best-backup-is-the-one-you-never-think-about-be_bsky-text-0004",
+      "files": [
+        {
+          "role": "media",
+          "path": "media.mp4",
+          "sizeBytes": 1024,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "hashes": {
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "backedUpAt": "2026-11-07T12:00:00Z"
+    },
+    {
+      "id": "x-ar-0003",
+      "platform": "x",
+      "kind": "text",
+      "description": "مرحبا بكم في قناتي الجديدة! سننشر كل أسبوع فيديو جديد عن التصوير والمونتاج. شكراً لدعمكم المستمر ❤️ #تصوير #مونتاج https://example.com/ar",
+      "tags": [],
+      "language": "ar",
+      "publishedAt": "2024-05-02T08:15:00+03:00",
+      "chapters": [],
+      "captions": [],
+      "thumbnails": [],
+      "media": [],
+      "playlists": [],
+      "comments": [],
+      "flags": {
+        "membersOnly": false,
+        "ageRestricted": false,
+        "geoBlocked": false,
+        "live": false,
+        "premiere": false,
+        "upcoming": false,
+        "repost": false,
+        "reply": false,
+        "quote": false,
+        "licensedSound": false,
+        "needsHelperFetch": false,
+        "downscaled": false
+      },
+      "source": {
+        "via": "export",
+        "detail": "data/tweets.js"
+      },
+      "folder": "x/creator/2024/2024-05-02_مرحبا-بكم-في-قناتي-الجديدة!-سننشر-كل-أسبوع-فيديو-جديد-عن-الت_x-ar-0003",
+      "files": [
+        {
+          "role": "media",
+          "path": "media.mp4",
+          "sizeBytes": 1024,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "hashes": {
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "backedUpAt": "2026-11-07T12:00:00Z"
+    }
+  ]
+}

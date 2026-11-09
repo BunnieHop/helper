@@ -1,0 +1,51 @@
+[package]
+name = "bunniehop-helper"
+version = "0.1.0"
+description = "BunnieHop Helper: downloads and posts as you, on your computer."
+license = "AGPL-3.0-or-later"
+authors = ["BunnieHop contributors", "Jelle Glebbeek (youtube-dl-gui)"]
+edition = "2021"
+publish = false
+
+[lib]
+name = "bunniehop_helper"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bunniehop-helper"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.8", features = ["ws", "macros"] }
+tokio = { version = "1.52", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+hmac = "0.13"
+hex = "0.4"
+rand = "0.10.1"
+base64 = "0.22.1"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+thiserror = "2"
+uuid = { version = "1.19.0", features = ["v4"] }
+dirs = "6"
+time = { version = "0.3", features = ["formatting", "parsing", "serde", "macros"] }
+reqwest = { version = "0.13", features = ["json", "stream", "form", "multipart", "query"] }
+futures-util = "0.3"
+zip = { version = "8.1.0", default-features = false, features = ["deflate"] }
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+p256 = { version = "0.14", default-features = false, features = ["ecdsa", "std"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.176"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+tempfile = "3"
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true

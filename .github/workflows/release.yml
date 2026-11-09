@@ -1,0 +1,69 @@
+name: release-helper
+# Builds the BunnieHop Helper for macOS (universal), Windows and Linux when a `helper-v*` tag is
+# pushed, and attaches the archives to that GitHub Release. get.bunniehop.party redirects to the
+# latest ones. Published copy of the monorepo's workflow (scripts/publish-helper.sh). Unsigned until the Apple/Windows signing items in
+# docs/backlog.md are done; each archive ships with its SHA-256 and the AGPL source notice.
+on:
+  push:
+    tags: ['helper-v*']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            asset: BunnieHop-Helper_macos-universal.zip
+          - os: windows-latest
+            asset: BunnieHop-Helper_windows-x64.zip
+          - os: ubuntu-22.04
+            asset: BunnieHop-Helper_linux-x64.tar.gz
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - name: Linux keychain deps
+        if: matrix.os == 'ubuntu-22.04'
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+      - name: Test
+        run: cargo test --release
+      - name: Build (macOS universal)
+        if: matrix.os == 'macos-latest'
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+          mkdir -p dist
+          lipo -create -output dist/bunniehop-helper \
+            target/aarch64-apple-darwin/release/bunniehop-helper \
+            target/x86_64-apple-darwin/release/bunniehop-helper
+      - name: Build (Windows / Linux)
+        if: matrix.os != 'macos-latest'
+        run: |
+          cargo build --release
+          mkdir -p dist
+          cp target/release/bunniehop-helper$([ "$RUNNER_OS" = Windows ] && echo .exe) dist/
+      - name: Package
+        run: |
+          cp LICENSE dist/LICENSE-AGPL.txt 2>/dev/null || true
+          cp README.md dist/README.md 2>/dev/null || true
+          cd dist
+          case "${{ matrix.asset }}" in
+            *.zip) if [ "$RUNNER_OS" = Windows ]; then 7z a "../${{ matrix.asset }}" . >/dev/null; else zip -r "../${{ matrix.asset }}" . >/dev/null; fi ;;
+            *.tar.gz) tar czf "../${{ matrix.asset }}" . ;;
+          esac
+          cd ..
+          (sha256sum "${{ matrix.asset }}" 2>/dev/null || shasum -a 256 "${{ matrix.asset }}") > "${{ matrix.asset }}.sha256"
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            ${{ matrix.asset }}
+            ${{ matrix.asset }}.sha256

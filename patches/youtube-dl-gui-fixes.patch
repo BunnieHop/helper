@@ -1,0 +1,170 @@
+diff --git a/src-tauri/src/models/ytdlp.rs b/src-tauri/src/models/ytdlp.rs
+index 689e49e..b773229 100644
+--- a/src-tauri/src/models/ytdlp.rs
++++ b/src-tauri/src/models/ytdlp.rs
+@@ -20,7 +20,7 @@ pub struct YtdlpInfo {
+   pub formats: Option<Vec<YtdlpFormat>>,
+   pub subtitles: Option<HashMap<String, Vec<YtdlpSubtitle>>>,
+   pub automatic_captions: Option<HashMap<String, Vec<YtdlpSubtitle>>>,
+-  #[serde(rename = "type_")]
++  #[serde(rename = "_type")]
+   pub type_: Option<String>,
+   pub is_live: Option<bool>,
+   pub entries: Option<Vec<YtdlpEntry>>,
+diff --git a/src-tauri/src/parsers/ytdlp_error.rs b/src-tauri/src/parsers/ytdlp_error.rs
+index 61746b9..67cf1f3 100644
+--- a/src-tauri/src/parsers/ytdlp_error.rs
++++ b/src-tauri/src/parsers/ytdlp_error.rs
+@@ -141,10 +141,9 @@ impl YtdlpErrorParser {
+ 
+     let (level, rest) = if let Some(msg) = trimmed.strip_prefix("ERROR:") {
+       (DiagnosticLevel::Error, msg.trim())
+-    } else if let Some(msg) = trimmed.strip_prefix("WARNING:") {
+-      (DiagnosticLevel::Warning, msg.trim())
+     } else {
+-      return None;
++      let msg = trimmed.strip_prefix("WARNING:")?;
++      (DiagnosticLevel::Warning, msg.trim())
+     };
+ 
+     let (component, rest) = split_component(rest);
+@@ -218,7 +217,8 @@ fn normalize_skip_message(line: &str) -> Option<String> {
+     return Some("Skipped by maximum downloads filter".to_string());
+   }
+ 
+-  if lower.contains("skipping") && lower.contains("age limit") || lower.contains("age restricted") {
++  if lower.contains("skipping") && (lower.contains("age limit") || lower.contains("age restricted"))
++  {
+     return Some("Skipped by age limit filter".to_string());
+   }
+ 
+@@ -328,4 +328,17 @@ mod tests {
+     assert_eq!(event.code, INPUT_FILTER_SKIPPED_CODE);
+     assert_eq!(event.message, "Skipped by advanced input filter");
+   }
++
++  #[test]
++  fn error_line_mentioning_age_restricted_is_not_a_benign_skip() {
++    let p = parser();
++    assert!(p
++      .parse_skip_line("ERROR: [youtube] abc123def45: Sign in to confirm your age. This video may be inappropriate for some users. age restricted")
++      .is_none());
++    let event = p
++      .parse_line("ERROR: [youtube] abc123def45: This video is age restricted")
++      .expect("error event");
++    assert!(matches!(event.level, DiagnosticLevel::Error));
++    assert_ne!(event.code, INPUT_FILTER_SKIPPED_CODE);
++  }
+ }
+diff --git a/src-tauri/src/parsers/ytdlp_info.rs b/src-tauri/src/parsers/ytdlp_info.rs
+index f7be424..e83232b 100644
+--- a/src-tauri/src/parsers/ytdlp_info.rs
++++ b/src-tauri/src/parsers/ytdlp_info.rs
+@@ -30,3 +30,26 @@ pub fn detect_info_type(info: &YtdlpInfo) -> InfoType {
+     InfoType::Single
+   }
+ }
++
++#[cfg(test)]
++mod tests {
++  use super::*;
++
++  #[test]
++  fn detects_playlist_from_underscore_type_with_empty_entries() {
++    // Trimmed real `yt-dlp -J --flat-playlist` output for an empty channel tab.
++    let json = r#"{
++      "id": "UCxxxxxxxxxxxxxxxxxxxxxx",
++      "title": "Empty Channel - Videos",
++      "_type": "playlist",
++      "entries": [],
++      "webpage_url": "https://www.youtube.com/@empty/videos",
++      "extractor": "youtube:tab",
++      "extractor_key": "YoutubeTab",
++      "playlist_count": 0
++    }"#;
++    let info: YtdlpInfo = serde_json::from_str(json).expect("valid json");
++    assert_eq!(info.type_.as_deref(), Some("playlist"));
++    assert!(matches!(detect_info_type(&info), InfoType::Playlist));
++  }
++}
+diff --git a/src-tauri/src/runners/ytdlp_download.rs b/src-tauri/src/runners/ytdlp_download.rs
+index 95aabc5..2ce8440 100644
+--- a/src-tauri/src/runners/ytdlp_download.rs
++++ b/src-tauri/src/runners/ytdlp_download.rs
+@@ -215,7 +215,7 @@ fn store_log_line(
+   log_state: State<LogStoreState>,
+   app: &AppHandle,
+ ) {
+-  if line.is_empty() || line.starts_with("RAW") {
++  if line.is_empty() || line.starts_with("RAW|") {
+     return;
+   }
+   let mut store = log_state.write();
+diff --git a/src-tauri/src/runners/ytdlp_info.rs b/src-tauri/src/runners/ytdlp_info.rs
+index 7b19405..e56dfba 100644
+--- a/src-tauri/src/runners/ytdlp_info.rs
++++ b/src-tauri/src/runners/ytdlp_info.rs
+@@ -129,9 +129,14 @@ pub async fn run_ytdlp_info_fetch(
+ 
+     // Truncate very large stderr payloads.
+     let stderr_snippet: Cow<str> = if stderr_text.len() > 8_192 {
++      // Never slice inside a multi-byte UTF-8 sequence (would panic on non-Latin output).
++      let mut cut = 8_192;
++      while !stderr_text.is_char_boundary(cut) {
++        cut -= 1;
++      }
+       Cow::Owned(format!(
+         "{}… (truncated, {} bytes total)",
+-        &stderr_text[..8_192],
++        &stderr_text[..cut],
+         stderr_text.len()
+       ))
+     } else if stderr_text.is_empty() {
+diff --git a/src-tauri/src/runners/ytdlp_runner.rs b/src-tauri/src/runners/ytdlp_runner.rs
+index d6aef5c..0f27032 100644
+--- a/src-tauri/src/runners/ytdlp_runner.rs
++++ b/src-tauri/src/runners/ytdlp_runner.rs
+@@ -273,7 +273,7 @@ impl<'a> YtdlpRunner<'a> {
+   }
+ 
+   pub fn with_url(mut self, url: &str) -> Self {
+-    self.args.push(url.into());
++    push_url_args(&mut self.args, url);
+     self
+   }
+ 
+@@ -861,10 +861,18 @@ fn subtitle_language_bases(languages: &[String]) -> Vec<String> {
+   bases
+ }
+ 
++/// End option parsing so a URL (or flat-playlist entry) starting with '-' can
++/// never be interpreted as a yt-dlp flag.
++fn push_url_args(args: &mut Vec<String>, url: &str) {
++  args.push("--".into());
++  args.push(url.into());
++}
++
+ #[cfg(test)]
+ mod tests {
+   use super::{
+-    build_sponsorblock_args, build_subtitle_args, normalize_extractor_args, summarize_args_for_log,
++    build_sponsorblock_args, build_subtitle_args, normalize_extractor_args, push_url_args,
++    summarize_args_for_log,
+   };
+   use crate::models::SubtitleInventory;
+   use crate::state::config_models::{SponsorBlockSettings, SubtitleSettings};
+@@ -1225,4 +1233,14 @@ mod tests {
+     assert!(!summary.has_browser_cookies);
+     assert!(!summary.has_auth);
+   }
++
++  #[test]
++  fn with_url_terminates_options_before_dash_prefixed_url() {
++    let mut args = vec!["--encoding".to_string(), "utf-8".to_string()];
++    push_url_args(&mut args, "-x");
++    assert_eq!(
++      &args[args.len() - 2..],
++      &["--".to_string(), "-x".to_string()]
++    );
++  }
+ }

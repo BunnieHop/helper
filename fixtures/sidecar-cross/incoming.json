@@ -1,0 +1,837 @@
+{
+  "format": "bunniehop.sidecar",
+  "version": 1,
+  "source": {
+    "platform": "youtube",
+    "handle": "creator"
+  },
+  "generatedAt": "2026-11-08T09:30:00Z",
+  "items": [
+    {
+      "id": "yt-premiere-0010",
+      "platform": "youtube",
+      "kind": "video",
+      "title": "Premiere: channel trailer 2027",
+      "description": "Premieres Friday.",
+      "tags": [],
+      "publishedAt": "2026-11-13T17:00:00-08:00",
+      "durationSec": 90,
+      "width": 1920,
+      "height": 1080,
+      "chapters": [],
+      "captions": [],
+      "thumbnails": [],
+      "media": [],
+      "playlists": [],
+      "comments": [],
+      "flags": {
+        "membersOnly": false,
+        "ageRestricted": false,
+        "geoBlocked": false,
+        "live": false,
+        "premiere": true,
+        "upcoming": true,
+        "repost": false,
+        "reply": false,
+        "quote": false,
+        "licensedSound": false,
+        "needsHelperFetch": false,
+        "downscaled": false
+      },
+      "folder": "youtube/creator/2026/2026-11-13_premiere-channel-trailer-2027_yt-premiere-0010",
+      "files": [
+        {
+          "role": "media",
+          "path": "media.mp4",
+          "sizeBytes": 1024,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "hashes": {
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "backedUpAt": "2026-11-08T09:30:00Z"
+    },
+    {
+      "id": "pod-ep-0015",
+      "platform": "youtube",
+      "kind": "podcast",
+      "title": "Ep. 48: Leaving a platform without losing your audience",
+      "description": "Show notes:\n00:00 Intro\n04:10 Exports\n31:00 Timestamps matter\nLinks: https://example.com/ep48",
+      "tags": [],
+      "language": "en",
+      "publishedAt": "2026-10-01T06:00:00-04:00",
+      "durationSec": 3725,
+      "sizeBytes": 60000000,
+      "chapters": [
+        {
+          "startSec": 0,
+          "title": "Intro"
+        },
+        {
+          "startSec": 250,
+          "title": "Exports"
+        },
+        {
+          "startSec": 1860,
+          "title": "Timestamps matter"
+        }
+      ],
+      "captions": [],
+      "thumbnails": [],
+      "media": [
+        {
+          "kind": "audio",
+          "path": "ep48.m4a",
+          "mime": "audio/mp4",
+          "sizeBytes": 60000000,
+          "durationSec": 3725
+        }
+      ],
+      "playlists": [],
+      "comments": [],
+      "flags": {
+        "membersOnly": false,
+        "ageRestricted": false,
+        "geoBlocked": false,
+        "live": false,
+        "premiere": false,
+        "upcoming": false,
+        "repost": false,
+        "reply": false,
+        "quote": false,
+        "licensedSound": false,
+        "needsHelperFetch": false,
+        "downscaled": false
+      },
+      "folder": "youtube/creator/2026/2026-10-01_ep.-48-leaving-a-platform-without-losing-your-audience_pod-ep-0015",
+      "files": [
+        {
+          "role": "media",
+          "path": "media.mp4",
+          "sizeBytes": 1024,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "hashes": {
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "backedUpAt": "2026-11-08T09:30:00Z"
+    },
+    {
+      "id": "yt-short-0007",
+      "platform": "youtube",
+      "kind": "short",
+      "title": "The 3-second hook rule #shorts",
+      "description": "Most people scroll in 3 seconds. Here is how to stop them. #shorts #creatortips #editing",
+      "tags": [
+        "shorts",
+        "hook"
+      ],
+      "publishedAt": "2026-09-01T09:00:00-05:00",
+      "durationSec": 42,
+      "width": 1080,
+      "height": 1920,
+      "sizeBytes": 38000000,
+      "chapters": [],
+      "captions": [],
+      "thumbnails": [
+        {
+          "path": "thumb.jpg",
+          "width": 1080,
+          "height": 1920
+        }
+      ],
+      "media": [
+        {
+          "kind": "video",
+          "path": "short.mp4",
+          "sizeBytes": 38000000,
+          "width": 1080,
+          "height": 1920,
+          "durationSec": 42,
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      ],
+      "playlists": [],
+      "comments": [],
+      "flags": {
+        "membersOnly": false,
+        "ageRestricted": false,
+        "geoBlocked": false,
+        "live": false,
+        "premiere": false,
+        "upcoming": false,
+        "repost": false,
+        "reply": false,
+        "quote": false,
+        "licensedSound": false,
+        "needsHelperFetch": false,
+        "downscaled": false
+      },
+      "folder": "youtube/creator/2026/2026-09-01_the-3-second-hook-rule-#shorts_yt-short-0007",
+      "files": [
+        {
+          "role": "media",
+          "path": "media.mp4",
+          "sizeBytes": 1024,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "hashes": {
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "backedUpAt": "2026-11-08T09:30:00Z"
+    },
+    {
+      "id": "tt-wm-0013",
+      "platform": "tiktok",
+      "kind": "short",
+      "description": "POV: your render finishes at 2am #editing #fyp",
+      "tags": [],
+      "publishedAt": "2026-07-07T23:00:00+02:00",
+      "durationSec": 21,
+      "width": 1080,
+      "height": 1920,
+      "sizeBytes": 12000000,
+      "chapters": [],
+      "captions": [],
+      "thumbnails": [],
+      "media": [
+        {
+          "kind": "video",
+          "path": "tt.mp4",
+          "sizeBytes": 12000000,
+          "width": 1080,
+          "height": 1920,
+          "durationSec": 21,
+          "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        }
+      ],
+      "playlists": [],
+      "comments": [],
+      "flags": {
+        "membersOnly": false,
+        "ageRestricted": false,
+        "geoBlocked": false,
+        "live": false,
+        "premiere": false,
+        "upcoming": false,
+        "repost": false,
+        "reply": false,
+        "quote": false,
+        "watermark": {
+          "brand": "tiktok",
+          "confidence": 0.97,
+          "region": [
+            0.02,
+            0.02,
+            0.3,
+            0.08
+          ]
+        },
+        "licensedSound": false,
+        "needsHelperFetch": false,
+        "downscaled": false
+      },
+      "folder": "tiktok/creator/2026/2026-07-07_pov-your-render-finishes-at-2am-#editing-#fyp_tt-wm-0013",
+      "files": [
+        {
+          "role": "media",
+          "path": "media.mp4",
+          "sizeBytes": 1024,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "hashes": {
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "backedUpAt": "2026-11-08T09:30:00Z"
+    },
+    {
+      "id": "ig-car-0005",
+      "platform": "instagram",
+      "kind": "carousel",
+      "description": "Behind the scenes from the shoot, all 12 frames. Which one is the cover? #bts #photography",
+      "tags": [],
+      "publishedAt": "2026-06-20T18:30:00-04:00",
+      "chapters": [],
+      "captions": [],
+      "thumbnails": [],
+      "media": [
+        {
+          "kind": "image",
+          "path": "img1.jpg",
+          "sizeBytes": 2000000,
+          "width": 1080,
+          "height": 1350,
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        {
+          "kind": "image",
+          "path": "img2.jpg",
+          "sizeBytes": 2000000,
+          "width": 1080,
+          "height": 1350,
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        {
+          "kind": "image",
+          "path": "img3.jpg",
+          "sizeBytes": 2000000,
+          "width": 1080,
+          "height": 1350,
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        {
+          "kind": "image",
+          "path": "img4.jpg",
+          "sizeBytes": 2000000,
+          "width": 1080,
+          "height": 1350,
+          "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        {
+          "kind": "image",
+          "path": "img5.jpg",
+          "sizeBytes": 2000000,
+          "width": 1080,
+          "height": 1350,
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        {
+          "kind": "image",
+          "path": "img6.jpg",
+          "sizeBytes": 2000000,
+          "width": 1080,
+          "height": 1350,
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        {
+          "kind": "image",
+          "path": "img7.jpg",
+          "sizeBytes": 2000000,
+          "width": 1080,
+          "height": 1350,
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        {
+          "kind": "image",
+          "path": "img8.jpg",
+          "sizeBytes": 2000000,
+          "width": 1080,
+          "height": 1350,
+          "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        {
+          "kind": "image",
+          "path": "img9.jpg",
+          "sizeBytes": 2000000,
+          "width": 1080,
+          "height": 1350,
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        {
+          "kind": "image",
+          "path": "img10.jpg",
+          "sizeBytes": 2000000,
+          "width": 1080,
+          "height": 1350,
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        {
+          "kind": "image",
+          "path": "img11.jpg",
+          "sizeBytes": 2000000,
+          "width": 1080,
+          "height": 1350,
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        {
+          "kind": "image",
+          "path": "img12.jpg",
+          "sizeBytes": 2000000,
+          "width": 1080,
+          "height": 1350,
+          "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        }
+      ],
+      "playlists": [],
+      "comments": [],
+      "flags": {
+        "membersOnly": false,
+        "ageRestricted": false,
+        "geoBlocked": false,
+        "live": false,
+        "premiere": false,
+        "upcoming": false,
+        "repost": false,
+        "reply": false,
+        "quote": false,
+        "licensedSound": false,
+        "needsHelperFetch": false,
+        "downscaled": false
+      },
+      "folder": "instagram/creator/2026/2026-06-20_behind-the-scenes-from-the-shoot,-all-12-frames.-which-one-i_ig-car-0005",
+      "files": [
+        {
+          "role": "media",
+          "path": "media.mp4",
+          "sizeBytes": 1024,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "hashes": {
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "backedUpAt": "2026-11-08T09:30:00Z"
+    },
+    {
+      "id": "ig-reel-0014",
+      "platform": "instagram",
+      "kind": "short",
+      "description": "Transition challenge 🔁 sound: trending track",
+      "tags": [],
+      "publishedAt": "2026-05-05T15:00:00+01:00",
+      "durationSec": 15,
+      "width": 1080,
+      "height": 1920,
+      "sizeBytes": 9000000,
+      "chapters": [],
+      "captions": [],
+      "thumbnails": [],
+      "media": [
+        {
+          "kind": "video",
+          "path": "reel.mp4",
+          "sizeBytes": 9000000,
+          "width": 1080,
+          "height": 1920,
+          "durationSec": 15
+        }
+      ],
+      "playlists": [],
+      "comments": [],
+      "flags": {
+        "membersOnly": false,
+        "ageRestricted": false,
+        "geoBlocked": false,
+        "live": false,
+        "premiere": false,
+        "upcoming": false,
+        "repost": false,
+        "reply": false,
+        "quote": false,
+        "licensedSound": true,
+        "needsHelperFetch": false,
+        "downscaled": false
+      },
+      "folder": "instagram/creator/2026/2026-05-05_transition-challenge-🔁-sound-trending-track_ig-reel-0014",
+      "files": [
+        {
+          "role": "media",
+          "path": "media.mp4",
+          "sizeBytes": 1024,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "hashes": {
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "backedUpAt": "2026-11-08T09:30:00Z"
+    },
+    {
+      "id": "yt-members-0009",
+      "platform": "youtube",
+      "kind": "video",
+      "title": "Members Q&A #12",
+      "description": "Thanks for supporting the channel.",
+      "tags": [],
+      "publishedAt": "2026-02-02T19:00:00-08:00",
+      "durationSec": 2400,
+      "width": 1920,
+      "height": 1080,
+      "sizeBytes": 1200000000,
+      "visibility": "public",
+      "chapters": [],
+      "captions": [],
+      "thumbnails": [],
+      "media": [],
+      "playlists": [],
+      "comments": [],
+      "flags": {
+        "membersOnly": true,
+        "ageRestricted": false,
+        "geoBlocked": false,
+        "live": false,
+        "premiere": false,
+        "upcoming": false,
+        "repost": false,
+        "reply": false,
+        "quote": false,
+        "licensedSound": false,
+        "needsHelperFetch": false,
+        "downscaled": false
+      },
+      "folder": "youtube/creator/2026/2026-02-02_members-q&a-#12_yt-members-0009",
+      "files": [
+        {
+          "role": "media",
+          "path": "media.mp4",
+          "sizeBytes": 1024,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "hashes": {
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "backedUpAt": "2026-11-08T09:30:00Z"
+    },
+    {
+      "id": "ig-emoji-0002",
+      "platform": "instagram",
+      "kind": "image",
+      "title": " (edited)",
+      "description": "👩🏽‍💻 shipping day 🚀🚀 family trip 👨‍👩‍👧‍👦 + new flag 🏳️‍🌈 ✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨ ok 👍🏿",
+      "tags": [],
+      "publishedAt": "2025-12-31T23:59:00+01:00",
+      "chapters": [],
+      "captions": [],
+      "thumbnails": [],
+      "media": [
+        {
+          "kind": "image",
+          "path": "p.jpg",
+          "sizeBytes": 3000000,
+          "width": 1080,
+          "height": 1350,
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "playlists": [],
+      "comments": [],
+      "flags": {
+        "membersOnly": false,
+        "ageRestricted": false,
+        "geoBlocked": false,
+        "live": false,
+        "premiere": false,
+        "upcoming": false,
+        "repost": false,
+        "reply": false,
+        "quote": false,
+        "licensedSound": false,
+        "needsHelperFetch": false,
+        "downscaled": false
+      },
+      "source": {
+        "via": "export",
+        "detail": "your_instagram_activity/media/posts_1.json"
+      },
+      "folder": "ignored/new-folder",
+      "files": [
+        {
+          "role": "thumbnail",
+          "path": "thumbnail.jpg",
+          "sizeBytes": 10
+        }
+      ],
+      "hashes": {},
+      "backedUpAt": "2026-11-08T09:30:00Z"
+    },
+    {
+      "id": "x-cjk-0017",
+      "platform": "x",
+      "kind": "text",
+      "description": "新しい動画を公開しました！編集のコツを全部まとめています。@collab_jp さんありがとう https://example.com/jp",
+      "tags": [],
+      "publishedAt": "2025-03-03T21:00:00+09:00",
+      "chapters": [],
+      "captions": [],
+      "thumbnails": [],
+      "media": [],
+      "playlists": [],
+      "comments": [],
+      "flags": {
+        "membersOnly": false,
+        "ageRestricted": false,
+        "geoBlocked": false,
+        "live": false,
+        "premiere": false,
+        "upcoming": false,
+        "repost": false,
+        "reply": false,
+        "quote": false,
+        "licensedSound": false,
+        "needsHelperFetch": false,
+        "downscaled": false
+      },
+      "folder": "x/creator/2025/2025-03-03_新しい動画を公開しました！編集のコツを全部まとめています。@collab_jp-さんありがとう-https-exampl_x-cjk-0017",
+      "files": [
+        {
+          "role": "media",
+          "path": "media.mp4",
+          "sizeBytes": 1024,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "hashes": {
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "backedUpAt": "2026-11-08T09:30:00Z"
+    },
+    {
+      "id": "ss-post-0016",
+      "platform": "substack",
+      "kind": "article",
+      "title": "Why I am moving my newsletter",
+      "description": "A short note on ownership.",
+      "bodyHtml": "<p>Hello friends.</p><p><img src=\"https://substackcdn.com/image/fetch/x.png\"></p><div class=\"paywall\"></div><p>Paid part.</p>",
+      "tags": [],
+      "publishedAt": "2025-01-15T07:00:00-05:00",
+      "chapters": [],
+      "captions": [],
+      "thumbnails": [],
+      "media": [],
+      "playlists": [],
+      "comments": [],
+      "flags": {
+        "membersOnly": false,
+        "ageRestricted": false,
+        "geoBlocked": false,
+        "live": false,
+        "premiere": false,
+        "upcoming": false,
+        "repost": false,
+        "reply": false,
+        "quote": false,
+        "licensedSound": false,
+        "needsHelperFetch": false,
+        "downscaled": false
+      },
+      "source": {
+        "via": "export",
+        "detail": "posts.csv"
+      },
+      "folder": "substack/creator/2025/2025-01-15_why-i-am-moving-my-newsletter_ss-post-0016",
+      "files": [
+        {
+          "role": "media",
+          "path": "media.mp4",
+          "sizeBytes": 1024,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "hashes": {
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "backedUpAt": "2026-11-08T09:30:00Z"
+    },
+    {
+      "id": "x-reply-0012",
+      "platform": "x",
+      "kind": "text",
+      "description": "@fan thanks!! next video drops Friday",
+      "tags": [],
+      "publishedAt": "2024-01-11T11:11:00Z",
+      "chapters": [],
+      "captions": [],
+      "thumbnails": [],
+      "media": [],
+      "playlists": [],
+      "comments": [],
+      "flags": {
+        "membersOnly": false,
+        "ageRestricted": false,
+        "geoBlocked": false,
+        "live": false,
+        "premiere": false,
+        "upcoming": false,
+        "repost": false,
+        "reply": true,
+        "quote": false,
+        "licensedSound": false,
+        "needsHelperFetch": false,
+        "downscaled": false
+      },
+      "folder": "x/creator/2024/2024-01-11_@fan-thanks!!-next-video-drops-friday_x-reply-0012",
+      "files": [
+        {
+          "role": "media",
+          "path": "media.mp4",
+          "sizeBytes": 1024,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "hashes": {
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "backedUpAt": "2026-11-08T09:30:00Z"
+    },
+    {
+      "id": "x-rt-0011",
+      "platform": "x",
+      "kind": "text",
+      "description": "RT @someoneelse: this thread on lighting is gold",
+      "tags": [],
+      "publishedAt": "2024-01-10T10:10:00Z",
+      "chapters": [],
+      "captions": [],
+      "thumbnails": [],
+      "media": [],
+      "playlists": [],
+      "comments": [],
+      "flags": {
+        "membersOnly": false,
+        "ageRestricted": false,
+        "geoBlocked": false,
+        "live": false,
+        "premiere": false,
+        "upcoming": false,
+        "repost": true,
+        "reply": false,
+        "quote": false,
+        "licensedSound": false,
+        "needsHelperFetch": false,
+        "downscaled": false
+      },
+      "folder": "x/creator/2024/2024-01-10_rt-@someoneelse-this-thread-on-lighting-is-gold_x-rt-0011",
+      "files": [
+        {
+          "role": "media",
+          "path": "media.mp4",
+          "sizeBytes": 1024,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "hashes": {
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "backedUpAt": "2026-11-08T09:30:00Z"
+    },
+    {
+      "id": "yt-huge-0006",
+      "platform": "youtube",
+      "kind": "video",
+      "title": "12-hour livestream archive: building a studio from scratch",
+      "description": "Full unedited stream archive.",
+      "tags": [],
+      "publishedAt": "2023-11-11T10:00:00-08:00",
+      "durationSec": 43000,
+      "width": 3840,
+      "height": 2160,
+      "sizeBytes": 11000000000,
+      "chapters": [],
+      "captions": [],
+      "thumbnails": [],
+      "media": [
+        {
+          "kind": "video",
+          "path": "video.mkv",
+          "sizeBytes": 11000000000,
+          "width": 3840,
+          "height": 2160,
+          "durationSec": 43000
+        }
+      ],
+      "playlists": [],
+      "comments": [],
+      "flags": {
+        "membersOnly": false,
+        "ageRestricted": false,
+        "geoBlocked": false,
+        "live": false,
+        "premiere": false,
+        "upcoming": false,
+        "repost": false,
+        "reply": false,
+        "quote": false,
+        "licensedSound": false,
+        "needsHelperFetch": false,
+        "downscaled": false
+      },
+      "folder": "youtube/creator/2023/2023-11-11_12-hour-livestream-archive-building-a-studio-from-scratch_yt-huge-0006",
+      "files": [
+        {
+          "role": "media",
+          "path": "media.mp4",
+          "sizeBytes": 1024,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "hashes": {
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "backedUpAt": "2026-11-08T09:30:00Z"
+    },
+    {
+      "id": "vimeo-25-0008",
+      "platform": "vimeo",
+      "kind": "video",
+      "title": "Short film: Hop Season (25 min)",
+      "description": "A short film about a rabbit who will not sit still.",
+      "tags": [],
+      "publishedAt": "2022-04-01T20:00:00+00:00",
+      "durationSec": 1500,
+      "width": 1920,
+      "height": 1080,
+      "sizeBytes": 900000000,
+      "license": "CC BY-NC",
+      "chapters": [],
+      "captions": [
+        {
+          "lang": "en",
+          "kind": "manual",
+          "format": "srt",
+          "path": "captions/en.srt"
+        },
+        {
+          "lang": "es",
+          "kind": "auto",
+          "format": "vtt"
+        }
+      ],
+      "thumbnails": [],
+      "media": [
+        {
+          "kind": "video",
+          "path": "film.mp4",
+          "sizeBytes": 900000000,
+          "width": 1920,
+          "height": 1080,
+          "durationSec": 1500,
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      ],
+      "playlists": [],
+      "comments": [],
+      "flags": {
+        "membersOnly": false,
+        "ageRestricted": false,
+        "geoBlocked": false,
+        "live": false,
+        "premiere": false,
+        "upcoming": false,
+        "repost": false,
+        "reply": false,
+        "quote": false,
+        "licensedSound": false,
+        "needsHelperFetch": false,
+        "downscaled": false
+      },
+      "folder": "vimeo/creator/2022/2022-04-01_short-film-hop-season-(25-min)_vimeo-25-0008",
+      "files": [
+        {
+          "role": "media",
+          "path": "media.mp4",
+          "sizeBytes": 1024,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "hashes": {
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "backedUpAt": "2026-11-08T09:30:00Z"
+    }
+  ]
+}
