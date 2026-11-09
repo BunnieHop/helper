@@ -573,7 +573,9 @@ mod tests {
       .route("/xrpc/com.atproto.server.getServiceAuth", get(|| async { Json(json!({ "token": "svc" })) }))
       .route(
         "/xrpc/app.bsky.video.uploadVideo",
-        post(|State(p): State<Arc<Pds>>| async move {
+        // Reads the whole upload before answering, like the real service; answering early made
+        // the client's send fail on fast runners.
+        post(|State(p): State<Arc<Pds>>, _body: axum::body::Bytes| async move {
           *p.videos.lock().unwrap() += 1;
           Json(json!({ "jobStatus": { "jobId": "job1", "state": "JOB_STATE_CREATED" } }))
         }),

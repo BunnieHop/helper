@@ -430,7 +430,11 @@ mod tests {
     assert!(pair("--merge-output-format", "mp4"));
     assert!(pair("--ffmpeg-location", "/opt/ff/ffmpeg"));
     assert!(pair("--js-runtimes", "deno:/opt/deno"));
-    assert!(pair("-o", "/v/item/media.%(ext)s"));
+    let out = Path::new("/v/item")
+      .join("media.%(ext)s")
+      .display()
+      .to_string();
+    assert!(pair("-o", &out));
     assert_eq!(a.last().unwrap(), "https://youtu.be/abc");
     assert_eq!(a[a.len() - 2], "--");
     assert!(!a
