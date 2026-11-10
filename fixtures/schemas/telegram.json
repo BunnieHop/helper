@@ -1,0 +1,67 @@
+{
+  "$schema": "../destination.schema.json",
+  "version": 1,
+  "verifiedOn": "2026-11-09",
+  "media": {
+    "video": {
+      "containers": [
+        "mp4",
+        "mov"
+      ],
+      "faststart": false,
+      "maxBytes": 2000000000
+    },
+    "image": {
+      "maxBytes": 10000000
+    },
+    "audio": {
+      "maxBytes": 2000000000
+    }
+  },
+  "hashtags": {},
+  "mentions": {
+    "mode": "keep"
+  },
+  "firstComment": false,
+  "threads": {
+    "supported": false
+  },
+  "carousel": {
+    "max": 10
+  },
+  "backdate": false,
+  "nativeScheduler": false,
+  "safeZone": null,
+  "captionTracks": false,
+  "requiredChoices": [],
+  "finishInApp": [],
+  "unverified": [
+    "Live Helper user-session uploads, account-specific upload_max_fileparts_default and Premium 4 GB uploads are unverified; Premium capacity is not offered. The 10 MB photo cap is a conservative Helper policy, not a verified user-API maximum."
+  ],
+  "id": "telegram",
+  "name": "Telegram channel",
+  "phase": 3,
+  "category": "social",
+  "paths": [
+    "api"
+  ],
+  "counting": "utf16",
+  "docsUrl": "https://core.telegram.org/api",
+  "accepts": [
+    "text",
+    "image",
+    "carousel",
+    "video",
+    "short",
+    "audio",
+    "podcast"
+  ],
+  "fields": {
+    "body": {
+      "max": 1024
+    }
+  },
+  "linkPolicyDefault": "inline",
+  "dailyCapDefault": 30,
+  "notes": "Helper only: phone, Telegram code and conditional two-step password (O-012, O-018); channel posting rights required. User API, never a bot token. Checked official sources on 2026-11-09: https://telegram.org/faq#q-how-is-telegram-different-from-whatsapp documents files up to 2 GB, or 4 GB with Premium; https://telegram.org/faq_premium confirms 4 GB Premium uploads. https://core.telegram.org/api/config#upload-max-fileparts-default and https://core.telegram.org/api/files define runtime file-part limits times 524,288 bytes (documented example: 4,000 default and 8,000 Premium parts). Helper round 1 uses a conservative decimal 2,000,000,000-byte ceiling for video/audio; no Premium allowance is claimed. Photo 10 MB and text/caption 1,024 UTF-16 units are conservative Helper caps pending live verification. Up to ten photos form an album. Published requires channels.getMessages read-back. Go-live stays off. BunnieHop caps Telegram at 30 posts per day as a human-pace policy (D-052, matched to Threads), not a Telegram API quota."
+}

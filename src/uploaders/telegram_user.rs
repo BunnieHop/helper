@@ -1671,10 +1671,16 @@ pub(crate) mod flow_tests {
 
   #[test]
   fn telegram_default_daily_cap_spreads_later_posts() {
-    let schema: Value = serde_json::from_str(include_str!(
-      "../../../../packages/schemas/destinations/telegram.json"
-    ))
-    .unwrap();
+    // The schema lives in `packages/schemas` in the monorepo and is copied to
+    // `fixtures/schemas` in the published Helper source (scripts/publish-helper.sh).
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mono = root.join("../../packages/schemas/destinations/telegram.json");
+    let path = if mono.is_file() {
+      mono
+    } else {
+      root.join("fixtures/schemas/telegram.json")
+    };
+    let schema: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     assert_eq!(schema["dailyCapDefault"], 30);
     let pace = crate::pacing::Pace::from_plan(
       &json!({"pace":{"dailyCap":schema["dailyCapDefault"]}}),
