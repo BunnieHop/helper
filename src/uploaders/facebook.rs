@@ -851,7 +851,9 @@ mod tests {
     use axum::{http::StatusCode, routing::post};
     let base = serve(Router::new().route(
       "/12/photos",
-      post(|| async {
+      // Read the upload before refusing, as Facebook does: on Windows an unread body resets the
+      // connection, which the uploader rightly treats as "may have posted".
+      post(|_body: axum::body::Bytes| async {
         (
           StatusCode::FORBIDDEN,
           Json(json!({"error":{"message":"(#200) Missing permission"}})),
