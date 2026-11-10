@@ -70,8 +70,52 @@ impl Failure {
   }
 }
 
+/// Shared with the queue: uploads may be cancelled until the first publishing request starts.
+#[derive(Clone)]
+pub struct PublishControl {
+  cancel: watch::Receiver<bool>,
+  publishing: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl PublishControl {
+  pub fn new(cancel: watch::Receiver<bool>) -> Self {
+    Self {
+      cancel,
+      publishing: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    }
+  }
+
+  pub fn start_publish(&self) -> Result<(), Failure> {
+    let stopped = self.cancel.borrow();
+    if *stopped {
+      return Err(Failure::new("stopped", "Stopped before publishing."));
+    }
+    self
+      .publishing
+      .store(true, std::sync::atomic::Ordering::SeqCst);
+    drop(stopped);
+    Ok(())
+  }
+
+  fn started(&self) -> bool {
+    self.publishing.load(std::sync::atomic::Ordering::SeqCst)
+  }
+}
+
 pub trait Uploader: Send + Sync {
   fn publish<'a>(&'a self, u: Upload<'a>) -> BoxFut<'a, Result<Published, Failure>>;
+  /// Legacy opaque uploaders are conservatively treated as an in-flight publish. Multi-stage
+  /// uploaders override this and call start_publish immediately before their publish request.
+  fn publish_controlled<'a>(
+    &'a self,
+    u: Upload<'a>,
+    control: PublishControl,
+  ) -> BoxFut<'a, Result<Published, Failure>> {
+    Box::pin(async move {
+      control.start_publish()?;
+      self.publish(u).await
+    })
+  }
   /// True when publishing the same upload again can't make a second post (a deterministic
   /// record key, an idempotency key, or a search for the post first). After a crash mid-post
   /// such cells are simply retried; the others come back `publishedUnverified` (D11).
@@ -1064,15 +1108,43 @@ impl Hub {
       let started = now_ms();
       self.ledger.record(&pkey, &pace, started, false);
       let post = d.pointer("/options/posts").and_then(|m| m.get(&iid));
-      let res = up
-        .publish(Upload {
+      let control = PublishControl::new(hop.cancel.subscribe());
+      let mut cancelled = hop.cancel.subscribe();
+      let publishing = up.publish_controlled(
+        Upload {
           item,
           post,
           media: &media,
           idempotency_key: &ik,
           options: d.get("options").unwrap_or(&empty),
-        })
-        .await;
+        },
+        control.clone(),
+      );
+      tokio::pin!(publishing);
+      let res = tokio::select! {
+        biased;
+        _ = async { let _ = cancelled.wait_for(|stopped| *stopped).await; } => {
+          if control.started() { publishing.await } else { Err(Failure::new("stopped","Stopped before publishing.")) }
+        }
+        result = &mut publishing => result,
+      };
+      // A cancelled publish has an unknown outcome. Keep it in the duplicate ledger even when
+      // the uploader couldn't supply an ID; Stop must never turn it into a fresh retry.
+      let res = match res {
+        Err(f) if control.started() && (f.code == "stopped" || *hop.cancel.borrow()) => {
+          Ok(Published {
+            dest_item_id: String::new(),
+            dest_url: None,
+            verified: false,
+            note: Some(format!(
+              "{} Check {p} before posting again.{}",
+              f.message,
+              f.verbatim.map(|v| format!("\n{v}")).unwrap_or_default()
+            )),
+          })
+        }
+        other => other,
+      };
       match res {
         Ok(pb) => {
           self.ledger.record(&pkey, &pace, started, true);
@@ -1091,6 +1163,11 @@ impl Hub {
           // remembered before the cell is saved, so no later hop can post it again (D11)
           self.posted.finish(&ik, Some(entry));
           self.set_cell(hop, &iid, p, st);
+        }
+        Err(f) if f.code == "stopped" => {
+          self.posted.discard_upload(&ik);
+          self.posted.finish(&ik, None);
+          self.set_cell(hop, &iid, p, json!({"state":"skipped","issue":f.issue()}));
         }
         Err(f) if f.code == "quotaExceeded" => {
           // nothing went out; this post and the account's next ones wait for the reset
@@ -1727,6 +1804,142 @@ echo "BHF|$dir/media.mp4"
 
   fn finished(e: &Value) -> bool {
     e["type"] == "hopFinished" || e["type"] == "stopped"
+  }
+
+  struct StopPhases {
+    stage: std::sync::atomic::AtomicUsize,
+    upload: tokio::sync::Notify,
+    publish: tokio::sync::Notify,
+    fail_publish: bool,
+  }
+
+  impl Uploader for StopPhases {
+    fn publish<'a>(&'a self, _u: Upload<'a>) -> BoxFut<'a, Result<Published, Failure>> {
+      unreachable!("the Hub must pass publish control")
+    }
+    fn publish_controlled<'a>(
+      &'a self,
+      _u: Upload<'a>,
+      control: PublishControl,
+    ) -> BoxFut<'a, Result<Published, Failure>> {
+      Box::pin(async move {
+        use std::sync::atomic::Ordering;
+        self.stage.store(1, Ordering::SeqCst);
+        self.upload.notified().await;
+        control.start_publish()?;
+        self.stage.store(2, Ordering::SeqCst);
+        self.publish.notified().await;
+        self.stage.store(3, Ordering::SeqCst);
+        if self.fail_publish {
+          return Err(Failure::new("stopped", "Publish connection was cancelled."));
+        }
+        Ok(Published {
+          dest_item_id: "post-1".into(),
+          dest_url: None,
+          verified: true,
+          note: None,
+        })
+      })
+    }
+  }
+
+  async fn stop_at_phase(during_publish: bool, fail_publish: bool) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let dir = tempfile::tempdir().unwrap();
+    let uploader = Arc::new(StopPhases {
+      stage: AtomicUsize::new(0),
+      upload: tokio::sync::Notify::new(),
+      publish: tokio::sync::Notify::new(),
+      fail_publish,
+    });
+    let u = uploader.clone();
+    let tools = Arc::new(Tooling::new(Binaries::new(dir.path().join("bin")), false));
+    let hub = Hub::new(
+      dir.path().join("hops"),
+      dir.path().join("tmp"),
+      dir.path().join("vault"),
+      tools,
+      Arc::new(move |_, _| Some(u.clone() as Arc<dyn Uploader>)),
+    );
+    let mut p = plan(&[], &["facebook"]);
+    p["source"]["platform"] = json!("x");
+    p["items"] = json!([{"id":"a","platform":"x","kind":"text","description":"words","tags":[],"publishedAt":"2026-01-02T00:00:00Z"}]);
+    p.as_object_mut().unwrap().remove("vault");
+    let mut another = p.clone();
+    hub.start(p).unwrap();
+    tokio::time::timeout(Duration::from_secs(3), async {
+      while uploader.stage.load(Ordering::SeqCst) != 1 {
+        tokio::task::yield_now().await;
+      }
+    })
+    .await
+    .unwrap();
+    if during_publish {
+      uploader.upload.notify_one();
+      tokio::time::timeout(Duration::from_secs(3), async {
+        while uploader.stage.load(Ordering::SeqCst) != 2 {
+          tokio::task::yield_now().await;
+        }
+      })
+      .await
+      .unwrap();
+    }
+    hub.stop_all();
+    if during_publish {
+      uploader.publish.notify_one();
+    }
+    let events = until(&hub, |e| e["type"] == "stopped" && e["hopId"] == "hop-1").await;
+    let expected = if !during_publish {
+      "skipped"
+    } else if fail_publish {
+      "publishedUnverified"
+    } else {
+      "published"
+    };
+    assert!(
+      events
+        .iter()
+        .any(|e| e["type"] == "destinationState" && e["state"]["state"] == expected),
+      "{events:?}"
+    );
+    assert_eq!(
+      uploader.stage.load(Ordering::SeqCst),
+      if during_publish { 3 } else { 1 }
+    );
+    assert!(hub.retry("hop-1", "a", "facebook").is_err());
+    if during_publish && fail_publish {
+      let posted = crate::posted::Posted::open(dir.path().join("hops/posted.json"));
+      assert_eq!(
+        posted.posted("facebook|facebook-1|x|a").unwrap()["state"],
+        "publishedUnverified"
+      );
+      another["id"] = json!("hop-2");
+      hub.start(another).unwrap();
+      until(&hub, |e| {
+        e["type"] == "hopFinished" && e["hopId"] == "hop-2"
+      })
+      .await;
+      assert_eq!(
+        uploader.stage.load(Ordering::SeqCst),
+        3,
+        "a second hop never enters the uploader"
+      );
+    }
+  }
+
+  #[tokio::test]
+  async fn stop_during_upload_sends_no_publish() {
+    stop_at_phase(false, false).await;
+  }
+
+  #[tokio::test]
+  async fn stop_during_cancelled_publish_is_uncertain_and_never_retried() {
+    stop_at_phase(true, true).await;
+  }
+
+  #[tokio::test]
+  async fn stop_during_publish_lets_its_verified_result_finish() {
+    stop_at_phase(true, false).await;
   }
 
   #[cfg(unix)]

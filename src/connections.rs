@@ -91,6 +91,11 @@ pub fn account_key(platform: &str, label: &str, secret: &Value) -> String {
     "bluesky" => field("did").or(field("identifier")),
     "youtube" => field("channelId"),
     "linkedin" => field("author"),
+    "facebook" => field("pageId"),
+    "threads" | "instagram" | "pinterest" => field("userId"),
+    "tiktok" => field("openId"),
+    "tumblr" => field("blogId"),
+    "telegram" => field("channelId"),
     "ghost" | "wordpress" => field("url"),
     "discord" => field("url"),
     "mastodon" | "peertube" => None,
@@ -104,6 +109,7 @@ pub fn account_key(platform: &str, label: &str, secret: &Value) -> String {
 }
 
 pub struct Store {
+  pub telegram: crate::connect::TelegramSignIns,
   file: PathBuf,
   secrets: Box<dyn Secrets>,
   list: Mutex<Vec<Connection>>,
@@ -124,6 +130,7 @@ impl Store {
       c.account = account_key(&c.platform, &c.label, &secret);
     }
     Self {
+      telegram: Default::default(),
       file,
       secrets,
       list: Mutex::new(list),
@@ -165,10 +172,12 @@ impl Store {
   pub fn save(&self, mut c: Connection, secret: &Value) -> Result<Connection, String> {
     c.account = account_key(&c.platform, &c.label, secret);
     let mut l = self.lock();
-    if let Some(prev) = l
-      .iter()
-      .find(|p| p.platform == c.platform && (p.account == c.account || p.label == c.label))
-    {
+    let label_key = account_key(&c.platform, &c.label, &Value::Null);
+    if let Some(prev) = l.iter().find(|p| {
+      p.platform == c.platform
+        && (p.account == c.account
+          || (p.label == c.label && (p.account == label_key || c.account == label_key)))
+    }) {
       c.id = prev.id.clone();
     }
     self.secrets.set(&c.id, &secret.to_string())?;
@@ -317,5 +326,59 @@ mod tests {
       .unwrap();
     assert_ne!(other.account, a.account);
     assert!(!a.account.contains("mara"), "hashed, no ids in the key");
+  }
+
+  #[test]
+  fn renamed_page_blog_or_channel_keeps_duplicate_post_history() {
+    for (platform, field) in [
+      ("facebook", "pageId"),
+      ("threads", "userId"),
+      ("instagram", "userId"),
+      ("pinterest", "userId"),
+      ("tiktok", "openId"),
+      ("tumblr", "blogId"),
+      ("telegram", "channelId"),
+    ] {
+      let dir = tempfile::tempdir().unwrap();
+      let st = Store::open(
+        dir.path().join("connections.json"),
+        Box::new(MemorySecrets::default()),
+      );
+      let conn = |label: &str| Connection {
+        id: new_id(platform),
+        platform: platform.into(),
+        label: label.into(),
+        path: "api".into(),
+        checked_at: "t".into(),
+        choices: HashMap::new(),
+        account: String::new(),
+      };
+      let secret = json!({field:"account-1","accessToken":"secret"});
+      let first = st.save(conn("Old name"), &secret).unwrap();
+      let ledger = crate::posted::Posted::open(dir.path().join("posted.json"));
+      let key = |c: &Connection| format!("{platform}|{}|source|item-1", c.account);
+      assert!(matches!(
+        ledger.reserve(&key(&first), "t"),
+        crate::posted::Seen::Clear
+      ));
+      ledger.finish(
+        &key(&first),
+        Some(json!({"state":"published","destItemId":"post-1"})),
+      );
+      let renamed = st.save(conn("New name"), &secret).unwrap();
+      assert_eq!(first.id, renamed.id, "{platform}");
+      assert_eq!(
+        ledger.posted(&key(&renamed)).unwrap()["destItemId"],
+        "post-1"
+      );
+      let other = st
+        .save(conn("New name"), &json!({field:"account-2"}))
+        .unwrap();
+      assert_ne!(
+        other.id, renamed.id,
+        "different {platform} targets may share a name"
+      );
+      assert!(ledger.posted(&key(&other)).is_none());
+    }
   }
 }

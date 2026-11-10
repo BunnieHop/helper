@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connect Telegram · BunnieHop Helper</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#242329;background:#f8f6f1}body{margin:0;display:grid;min-height:100svh;place-items:center}main{box-sizing:border-box;width:min(100%,30rem);padding:2rem}h1{font-size:1.8rem;line-height:1.2}p{line-height:1.6}label{display:block;font-weight:600;margin:1.5rem 0 .5rem}input,select,button{box-sizing:border-box;width:100%;padding:.9rem;font:inherit;border:1px solid #817f87;border-radius:.6rem}button{margin-top:1rem;background:#37304e;color:white;border:0;font-weight:600;cursor:pointer}button:disabled{opacity:.6;cursor:wait}#error{color:#9c2037;white-space:pre-wrap}small{display:block;line-height:1.5;color:#615c68;margin-top:1.5rem}[hidden]{display:none!important}
+</style>
+<main><p>BunnieHop Helper</p><h1>Connect Telegram</h1><p id="hint">Type the phone number you use for Telegram, including its country code.</p>
+<form id="form"><label id="label" for="value">Phone number</label><input id="value" type="tel" autocomplete="tel" placeholder="+1 555 123 4567" required><select id="channel" hidden aria-label="Channel"></select><button id="next">Send code</button></form>
+<p id="error" role="alert"></p><small>Your sign-in stays on this computer. The Helper keeps your session in the system keychain. It never saves your two-step password.</small></main>
+<script>
+'use strict';
+const state=new URLSearchParams(location.search).get('state');history.replaceState(null,'','/telegram');
+const form=document.querySelector('#form'),value=document.querySelector('#value'),channel=document.querySelector('#channel'),button=document.querySelector('#next'),error=document.querySelector('#error'),hint=document.querySelector('#hint'),label=document.querySelector('#label');
+let stage='phone';
+form.addEventListener('submit',async event=>{
+ event.preventDefault();button.disabled=true;error.textContent='';
+ let entry=stage==='channel'?channel.value:value.value;
+ if(stage==='phone')entry=entry.replace(/[\s()-]/g,'');
+ value.value='';
+ try{
+  const response=await fetch('/telegram/step',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+state},body:JSON.stringify({stage,value:entry}),credentials:'omit',cache:'no-store',referrerPolicy:'no-referrer'});entry='';
+  const data=await response.json();
+  if(!response.ok){const issue=data.error||data;throw new Error([issue.message,issue.verbatim].filter(Boolean).join('\n')||'The sign-in stopped. Start again in BunnieHop.');}
+  stage=data.stage;
+  if(stage==='code'){label.textContent='Telegram code';value.type='text';value.inputMode='text';value.autocomplete='one-time-code';value.placeholder='';hint.textContent='Type the code Telegram sent. Check the Telegram app on your other device as well as your messages.';button.textContent='Continue';}
+  else if(stage==='password'){label.textContent='Two-step password';value.type='password';value.autocomplete='current-password';hint.textContent='Your Telegram account has a two-step password. Type it to finish signing in.';button.textContent='Sign in';}
+  else if(stage==='channel'){value.hidden=true;value.required=false;channel.hidden=false;label.htmlFor='channel';label.textContent='Post to this channel';hint.textContent='Choose the channel where your hops will post.';channel.replaceChildren(...data.channels.map(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=c.title;return o;}));button.textContent='Connect channel';}
+  else if(stage==='done'){form.hidden=true;hint.textContent='Telegram is connected. You can close this page and return to BunnieHop.';return;}
+  error.textContent=data.error||'';
+  if(!value.hidden)value.focus();else channel.focus();button.disabled=false;
+ }catch(e){entry='';value.value='';form.hidden=true;error.textContent=e instanceof Error?e.message:'The Telegram sign-in stopped. Start again in BunnieHop.';hint.textContent='Start Telegram sign-in again from BunnieHop when you are ready.';}
+});
+</script></html>

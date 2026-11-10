@@ -5,11 +5,18 @@
 pub mod atproto_oauth;
 pub mod bluesky;
 pub mod discord;
+pub mod facebook;
 pub mod ghost;
+pub mod instagram;
 pub mod linkedin;
 pub mod mastodon;
 pub mod peertube;
+pub mod pinterest;
 pub mod telegram;
+pub mod telegram_user;
+pub mod threads;
+pub mod tiktok;
+pub mod tumblr;
 pub mod wordpress;
 pub mod youtube;
 
@@ -42,6 +49,18 @@ pub struct Endpoints {
   /// api.bunniehop.party: OAuth relay for LinkedIn, Dropbox and Vimeo (token exchange only).
   pub worker: String,
   pub linkedin: String,
+  pub facebook: String,
+  pub facebook_video: String,
+  pub threads: String,
+  /// Instagram's resumable upload host; the uploader sends the token only here.
+  pub instagram_upload: String,
+  pub pinterest: String,
+  pub tiktok: String,
+  pub tumblr: String,
+  /// TikTok's upload host; chunks go only to addresses under it, with no token.
+  pub tiktok_upload: String,
+  /// Local provider upload handles; tests supply an isolated directory.
+  pub upload_handles: std::path::PathBuf,
   pub dropbox_api: String,
   /// Bluesky's public AppView (handle → DID) and the PLC directory (DID → server).
   pub bsky_public: String,
@@ -60,6 +79,17 @@ impl Default for Endpoints {
       telegram: "https://api.telegram.org".into(),
       worker: "https://api.bunniehop.party".into(),
       linkedin: "https://api.linkedin.com".into(),
+      facebook: "https://graph.facebook.com/v24.0".into(),
+      facebook_video: "https://graph-video.facebook.com/v24.0".into(),
+      threads: "https://graph.threads.com/v1.0".into(),
+      instagram_upload: "https://rupload.facebook.com".into(),
+      pinterest: "https://api.pinterest.com/v5".into(),
+      tiktok: "https://open.tiktokapis.com".into(),
+      tumblr: "https://api.tumblr.com/v2".into(),
+      tiktok_upload: "https://open-upload.tiktokapis.com".into(),
+      upload_handles: crate::config::Paths::system()
+        .data_dir
+        .join("hops/upload-handles"),
       dropbox_api: "https://api.dropboxapi.com".into(),
       bsky_public: "https://public.api.bsky.app".into(),
       plc: "https://plc.directory".into(),
@@ -98,6 +128,54 @@ pub fn registry(store: Arc<Store>, http: reqwest::Client, ep: Endpoints) -> Uplo
       "ghost" => Arc::new(ghost::Ghost::new(http.clone(), &secret)?),
       "wordpress" => Arc::new(wordpress::WordPress::new(http.clone(), &secret, &ep)?),
       "linkedin" => Arc::new(linkedin::LinkedIn::new(http.clone(), &secret, &ep)?),
+      "facebook" => Arc::new(facebook::Facebook::new(
+        http.clone(),
+        &secret,
+        &ep,
+        ep.upload_handles.clone(),
+      )?),
+      "instagram" => Arc::new(instagram::Instagram::new(
+        http.clone(),
+        &secret,
+        &ep,
+        ep.upload_handles.clone(),
+      )?),
+      "pinterest" => Arc::new(pinterest::Pinterest::new(
+        http.clone(),
+        store.clone(),
+        &c.id,
+        &secret,
+        &ep,
+        ep.upload_handles.clone(),
+      )?),
+      "tumblr" => Arc::new(tumblr::Tumblr::new(
+        http.clone(),
+        store.clone(),
+        &c.id,
+        &secret,
+        &ep,
+        ep.upload_handles.clone(),
+      )?),
+      "tiktok" => Arc::new(tiktok::TikTok::new(
+        http.clone(),
+        store.clone(),
+        &c.id,
+        &secret,
+        &ep,
+        ep.upload_handles.clone(),
+      )?),
+      "threads" => Arc::new(threads::Threads::new(
+        http.clone(),
+        store.clone(),
+        &c.id,
+        &secret,
+        &ep,
+        ep.upload_handles.clone(),
+      )?),
+      "telegram" => Arc::new(telegram_user::Telegram::new(
+        &secret,
+        ep.upload_handles.clone(),
+      )?),
       "youtube" => Arc::new(youtube::YouTube::new(http.clone(), &secret, &ep)?),
       _ => return None,
     };
@@ -164,6 +242,46 @@ pub async fn json_or_fail(
       Err(status_failure(platform, StatusCode::BAD_GATEWAY, &text))
     }
   })
+}
+
+/// D-069: the answers to a publishing request that prove nothing was posted. Every other
+/// answer (408, 409, 429, any 5xx, an unreadable success, a timeout, a lost answer) may have
+/// posted, so the item reads unverified and is never sent again (D11).
+pub const NOTHING_POSTED: [u16; 7] = [400, 401, 403, 404, 413, 415, 422];
+
+pub fn nothing_posted(status: Option<StatusCode>) -> bool {
+  status.is_some_and(|s| NOTHING_POSTED.contains(&s.as_u16()))
+}
+
+/// The answer to the request that makes a post go live, sorted under D-069.
+pub enum PublishAnswer {
+  Posted(Value),
+  /// Nothing was posted: the caller releases the item's handle and returns the failure.
+  Refused(Failure),
+  /// The post may exist: the caller keeps the handle and reports it unverified.
+  Unknown(Failure),
+}
+
+pub async fn publish_answer(
+  platform: &str,
+  r: Result<reqwest::Response, reqwest::Error>,
+) -> PublishAnswer {
+  let status = r.as_ref().ok().map(|r| r.status());
+  match json_or_fail(platform, r).await {
+    Ok(v) => PublishAnswer::Posted(v),
+    Err(e) if nothing_posted(status) => PublishAnswer::Refused(e),
+    Err(e) => PublishAnswer::Unknown(e),
+  }
+}
+
+/// The creator's note when a post may exist but was not confirmed.
+pub fn unknown_note(platform: &str, e: &Failure, again: &str) -> String {
+  let mut note = format!("{} Check {platform} before {again} again.", e.message);
+  if let Some(v) = &e.verbatim {
+    note.push('\n');
+    note.push_str(v);
+  }
+  note
 }
 
 /// `instance` as typed by the creator ("mastodon.social", "https://video.example") → base URL.
@@ -447,12 +565,65 @@ pub mod testkit {
     tokio::spawn(async move { axum::serve(l, app).await.unwrap() });
     format!("http://{addr}")
   }
+
+  /// D-069's table: each answer to a publishing request, and whether it proves nothing was
+  /// posted. `0` stands for a lost answer: a success status whose body never arrives.
+  pub const REFUSAL_TABLE: [(u16, bool); 14] = [
+    (400, true),
+    (401, true),
+    (403, true),
+    (404, true),
+    (413, true),
+    (415, true),
+    (422, true),
+    (408, false),
+    (409, false),
+    (429, false),
+    (500, false),
+    (502, false),
+    (503, false),
+    (0, false),
+  ];
+
+  /// A fake platform's answer for one row of [`REFUSAL_TABLE`].
+  pub fn table_answer(code: u16) -> axum::response::Response {
+    use axum::{body::Body, http::StatusCode, response::IntoResponse};
+    if code == 0 {
+      let broken = futures_util::stream::once(async {
+        Err::<axum::body::Bytes, std::io::Error>(std::io::Error::other("connection dropped"))
+      });
+      return (StatusCode::OK, Body::from_stream(broken)).into_response();
+    }
+    (
+      StatusCode::from_u16(code).unwrap(),
+      axum::Json(serde_json::json!({"error":{"message":format!("answer {code}")}})),
+    )
+      .into_response()
+  }
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
   use serde_json::json;
+
+  #[test]
+  fn d069_only_definite_refusals_prove_nothing_was_posted() {
+    for (code, freed) in testkit::REFUSAL_TABLE.iter().filter(|(c, _)| *c != 0) {
+      assert_eq!(
+        nothing_posted(Some(StatusCode::from_u16(*code).unwrap())),
+        *freed,
+        "{code}"
+      );
+    }
+    // A timeout or a dropped connection has no status: the post may exist.
+    assert!(!nothing_posted(None));
+    assert!(!nothing_posted(Some(StatusCode::OK)));
+    assert!(
+      !nothing_posted(Some(StatusCode::GONE)),
+      "unlisted answers stay unverified"
+    );
+  }
 
   #[test]
   fn uploader_instance_addresses_are_https_except_loopback() {

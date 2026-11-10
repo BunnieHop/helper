@@ -26,11 +26,9 @@ pub const RELAY_CALLBACK_PATH: &str = "/oauth/callback";
 /// Sign-ins that come back to a bunniehop.party page (WordPress app approval) are handed to the
 /// Helper here by that page; only a sign-in this Helper started (by `state`) is completed.
 pub const RETURN_PATH: &str = "/v1/oauth/return";
-/// WordPress shows this id on the creator's Application Passwords list.
-const WP_APP_ID: &str = "6f1c5b0e-8f5d-4c39-9a51-b1e5a7f0c2d4";
 const CODE_WAIT: Duration = Duration::from_secs(600);
 /// Destinations with a shipped uploader (capabilities, D12).
-pub const PLATFORMS: [&str; 9] = [
+pub const PLATFORMS: [&str; 16] = [
   "bluesky",
   "mastodon",
   "pixelfed",
@@ -40,6 +38,13 @@ pub const PLATFORMS: [&str; 9] = [
   "wordpress",
   "linkedin",
   "youtube",
+  "facebook",
+  "threads",
+  "instagram",
+  "pinterest",
+  "tiktok",
+  "tumblr",
+  "telegram",
 ];
 /// Cloud vault accounts the Helper can sign in to (capabilities `vaults`).
 pub const VAULT_ACCOUNTS: [&str; 2] = ["dropbox", "google-drive"];
@@ -49,6 +54,10 @@ pub fn routes() -> Router<AppState> {
   Router::new()
     .route("/v1/connections", get(list))
     .route("/v1/connections/{key}", post(connect).delete(remove))
+    .route(
+      "/v1/connections/{key}/publish-options",
+      get(publish_options),
+    )
     .route(CALLBACK_PATH, get(callback))
     .route(RELAY_CALLBACK_PATH, get(callback))
     .route(RETURN_PATH, post(returned))
@@ -121,6 +130,7 @@ async fn connect(
     account: String::new(),
   };
   let (c, secret) = match platform.as_str() {
+    "telegram" => return telegram_connect(&st, &f).await,
     "bluesky" => {
       let handle = field(
         &f,
@@ -308,6 +318,52 @@ async fn connect(
         .map_err(fail)?;
       (conn(label, HashMap::new()), secret)
     }
+    "instagram" => {
+      let tokens = relay_sign_in(&st, "instagram").await?;
+      let (label, secret) =
+        crate::uploaders::instagram::connect(&st.http, &st.endpoints, &tokens, opt(&f, "account"))
+          .await
+          .map_err(fail)?;
+      (conn(label, HashMap::new()), secret)
+    }
+    "pinterest" => {
+      let tokens = relay_sign_in(&st, "pinterest").await?;
+      let (label, secret) =
+        crate::uploaders::pinterest::connect(&st.http, &st.endpoints, &tokens, opt(&f, "board"))
+          .await
+          .map_err(fail)?;
+      (conn(label, HashMap::new()), secret)
+    }
+    "tumblr" => {
+      let tokens = relay_sign_in(&st, "tumblr").await?;
+      let (label, secret) =
+        crate::uploaders::tumblr::connect(&st.http, &st.endpoints, &tokens, opt(&f, "blog"))
+          .await
+          .map_err(fail)?;
+      (conn(label, HashMap::new()), secret)
+    }
+    "tiktok" => {
+      let tokens = relay_sign_in(&st, "tiktok").await?;
+      let (label, secret) = crate::uploaders::tiktok::connect(&st.http, &st.endpoints, &tokens)
+        .await
+        .map_err(fail)?;
+      (conn(label, HashMap::new()), secret)
+    }
+    "threads" => {
+      let tokens = relay_sign_in(&st, "threads").await?;
+      let (label, secret) = crate::uploaders::threads::connect(&st.http, &st.endpoints, &tokens)
+        .await
+        .map_err(fail)?;
+      (conn(label, HashMap::new()), secret)
+    }
+    "facebook" => {
+      let tokens = relay_sign_in(&st, "facebook").await?;
+      let (label, secret) =
+        crate::uploaders::facebook::connect(&st.http, &st.endpoints, &tokens, opt(&f, "page"))
+          .await
+          .map_err(fail)?;
+      (conn(label, HashMap::new()), secret)
+    }
     "linkedin" => {
       let tokens = relay_sign_in(&st, "linkedin").await?;
       let (label, secret) = linkedin::connect(&st.http, &st.endpoints, &tokens)
@@ -443,6 +499,11 @@ pub async fn relay_sign_in_with(
 /// WordPress's own "Authorize application" page: the creator signs in to their site as usual and
 /// clicks Approve; WordPress makes an application password and sends it back to a bunniehop.party
 /// page, which hands it to this Helper over loopback. Nothing is typed but the site address.
+///
+/// The Helper opens bunniehop.party's `/connect/wp-start`, never WordPress itself: that page goes on
+/// to the approve page only once the browser's BunnieHop service worker answers `/connect/return`
+/// locally, so the password in WordPress's redirect never reaches a server (D-120). The site, state
+/// and port ride in the fragment, which the browser keeps to itself.
 async fn wordpress_approve(
   st: &AppState,
   web: &str,
@@ -451,14 +512,10 @@ async fn wordpress_approve(
   use crate::uploaders::ghost::urlencode;
   let base = crate::uploaders::site_url(site).map_err(fail)?;
   let state = new_state();
-  let ret = format!(
-    "{web}/connect/return?provider=wordpress&state={state}&port={}",
-    st.port
-  );
   let url = format!(
-    "{base}/wp-admin/authorize-application.php?app_name=BunnieHop&app_id={WP_APP_ID}&success_url={}&reject_url={}",
-    urlencode(&ret),
-    urlencode(&format!("{ret}&rejected=1"))
+    "{web}/connect/wp-start#site={}&state={state}&port={}",
+    urlencode(&base),
+    st.port
   );
   let v = browser_return(st, &state, &url).await?;
   let (Some(user), Some(pass)) = (v["user_login"].as_str(), v["password"].as_str()) else {
@@ -506,6 +563,39 @@ async fn returned(
   StatusCode::NO_CONTENT
 }
 
+/// `GET /v1/connections/{id}/publish-options`: what TikTok lets this account choose right now,
+/// asked fresh each time the TikTok panel opens (D-066, O-015).
+async fn publish_options(
+  State(st): State<AppState>,
+  _t: PairedToken,
+  Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+  let missing = || {
+    ApiError::new(
+      StatusCode::NOT_FOUND,
+      "signInRequired",
+      "Connect TikTok first.",
+    )
+  };
+  let c = st
+    .connections
+    .get(&id)
+    .filter(|c| c.platform == "tiktok")
+    .ok_or_else(missing)?;
+  let secret = st.connections.secret(&c.id).ok_or_else(missing)?;
+  let up = crate::uploaders::tiktok::TikTok::new(
+    st.http.clone(),
+    st.connections.clone(),
+    &c.id,
+    &secret,
+    &st.endpoints,
+    st.endpoints.upload_handles.clone(),
+  )
+  .ok_or_else(missing)?;
+  let creator = up.creator().await.map_err(fail)?;
+  Ok(Json(creator.to_json()))
+}
+
 async fn remove(State(st): State<AppState>, _t: PairedToken, Path(id): Path<String>) -> StatusCode {
   if st.connections.remove(&id) {
     StatusCode::NO_CONTENT
@@ -545,6 +635,195 @@ async fn callback(
       )),
     ),
   }
+}
+
+/// Local Telegram sign-ins. A paired request creates one short-lived capability. Phone,
+/// code and password are accepted only by the separate loopback router in server.rs.
+#[derive(Default)]
+pub struct TelegramSignIns {
+  jobs: tokio::sync::Mutex<HashMap<String, TelegramJob>>,
+  last_phone: tokio::sync::Mutex<Option<std::time::Instant>>,
+}
+struct TelegramJob {
+  flow: crate::uploaders::telegram_user::SignIn,
+  done: tokio::sync::oneshot::Sender<Connection>,
+  created: std::time::Instant,
+}
+impl TelegramSignIns {
+  pub(crate) async fn active(&self, state: &str) -> bool {
+    self
+      .jobs
+      .lock()
+      .await
+      .get(state)
+      .is_some_and(|j| j.created.elapsed() < crate::uploaders::telegram_user::SIGN_IN_TTL)
+  }
+}
+
+async fn telegram_connect(
+  st: &AppState,
+  fields: &HashMap<String, String>,
+) -> Result<Json<Connection>, ApiError> {
+  if !fields.is_empty() {
+    return Err(fail(Failure::new("notSupported", "Telegram sign-in takes place in the Helper's local page. Start again without sending sign-in details from the website.")));
+  }
+  let api = crate::uploaders::telegram_user::Gram::configured(None).map_err(fail)?;
+  let state = new_state();
+  let (tx, rx) = tokio::sync::oneshot::channel();
+  {
+    let mut jobs = st.connections.telegram.jobs.lock().await;
+    jobs.retain(|_, j| j.created.elapsed() < crate::uploaders::telegram_user::SIGN_IN_TTL);
+    if !jobs.is_empty() {
+      return Err(fail(Failure::new(
+        "signInRequired",
+        "A Telegram sign-in is already open in the Helper. Finish it or wait for it to expire.",
+      )));
+    }
+    jobs.insert(
+      state.clone(),
+      TelegramJob {
+        flow: crate::uploaders::telegram_user::SignIn::new(Box::new(api)),
+        done: tx,
+        created: std::time::Instant::now(),
+      },
+    );
+  }
+  (st.open_url)(&format!(
+    "http://127.0.0.1:{}/telegram?state={state}",
+    st.port
+  ));
+  let result = tokio::time::timeout(crate::uploaders::telegram_user::SIGN_IN_TTL, rx).await;
+  st.connections.telegram.jobs.lock().await.remove(&state);
+  match result {
+    Ok(Ok(c)) => Ok(Json(c)),
+    _ => Err(ApiError::new(
+      StatusCode::BAD_REQUEST,
+      "signInRequired",
+      "The Telegram sign-in closed or expired. Start again.",
+    )),
+  }
+}
+
+pub const TELEGRAM_PAGE: &str = "/telegram";
+pub const TELEGRAM_STEP: &str = "/telegram/step";
+
+pub fn telegram_routes() -> Router<AppState> {
+  Router::new()
+    .route(TELEGRAM_PAGE, get(telegram_page))
+    .route(TELEGRAM_STEP, post(telegram_step))
+    .layer(axum::extract::DefaultBodyLimit::max(4096))
+}
+
+/// Called by the additive guard before parsing any sign-in input.
+pub fn telegram_capability(req: &axum::extract::Request) -> Option<String> {
+  let state = if req.uri().path() == TELEGRAM_PAGE && req.method() == axum::http::Method::GET {
+    req.uri().query().and_then(|q| q.strip_prefix("state="))
+  } else {
+    req
+      .headers()
+      .get(axum::http::header::AUTHORIZATION)
+      .and_then(|v| v.to_str().ok())
+      .and_then(|s| s.strip_prefix("Bearer "))
+  };
+  state.filter(|s| s.len() == 43).map(str::to_owned)
+}
+
+async fn telegram_page() -> impl IntoResponse {
+  Html(include_str!("telegram-connect.html"))
+}
+
+#[derive(Deserialize)]
+struct TelegramStep {
+  stage: String,
+  #[serde(default)]
+  value: String,
+}
+async fn telegram_step(
+  State(st): State<AppState>,
+  headers: axum::http::HeaderMap,
+  body: Result<Json<TelegramStep>, axum::extract::rejection::JsonRejection>,
+) -> Result<Json<Value>, ApiError> {
+  let state = headers
+    .get(axum::http::header::AUTHORIZATION)
+    .and_then(|v| v.to_str().ok())
+    .and_then(|v| v.strip_prefix("Bearer "))
+    .unwrap_or("");
+  let Json(input) = body.map_err(|_| {
+    fail(Failure::new(
+      "signInRequired",
+      "The Helper couldn't read that sign-in step. Start again.",
+    ))
+  })?;
+  let mut job = st
+    .connections
+    .telegram
+    .jobs
+    .lock()
+    .await
+    .remove(state)
+    .ok_or_else(|| {
+      fail(Failure::new(
+        "signInRequired",
+        "This Telegram sign-in expired. Start again.",
+      ))
+    })?;
+  if job.created.elapsed() >= crate::uploaders::telegram_user::SIGN_IN_TTL {
+    return Err(fail(Failure::new(
+      "signInRequired",
+      "This Telegram sign-in expired. Start again.",
+    )));
+  }
+  if input.stage == "channel" {
+    let (label, secret) = job.flow.finish(&input.value).await.map_err(fail)?;
+    let c = st
+      .connections
+      .save(
+        Connection {
+          id: new_id("telegram"),
+          platform: "telegram".into(),
+          label,
+          path: "api".into(),
+          checked_at: iso(SystemTime::now()),
+          choices: HashMap::new(),
+          account: String::new(),
+        },
+        &secret,
+      )
+      .map_err(|_| {
+        ApiError::internal("Couldn't save the Telegram session to this computer's keychain.")
+      })?;
+    let _ = job.done.send(c);
+    return Ok(Json(json!({"stage":"done"})));
+  }
+  if input.stage == "phone" {
+    let mut last = st.connections.telegram.last_phone.lock().await;
+    if last.is_some_and(|t| t.elapsed() < Duration::from_secs(60)) {
+      return Err(fail(Failure::new(
+        "rateLimited429",
+        "Wait a minute before asking Telegram for another code.",
+      )));
+    }
+    *last = Some(std::time::Instant::now());
+  }
+  let output = tokio::time::timeout(
+    Duration::from_secs(60),
+    job.flow.advance(&input.stage, &input.value),
+  )
+  .await
+  .map_err(|_| {
+    fail(Failure::new(
+      "signInRequired",
+      "Telegram did not answer in time. Check Telegram before starting sign-in again.",
+    ))
+  })?
+  .map_err(fail)?;
+  st.connections
+    .telegram
+    .jobs
+    .lock()
+    .await
+    .insert(state.into(), job);
+  Ok(Json(output))
 }
 
 #[cfg(test)]
@@ -693,22 +972,17 @@ mod tests {
       )
       .await
     });
+    // the Helper opens BunnieHop's start page, never WordPress itself: the start page goes on to
+    // WordPress only once the browser answers /connect/return locally (D-120)
     let url = opened_url(&opened).await;
-    assert!(url.starts_with(&format!(
-      "{base}/wp-admin/authorize-application.php?app_name=BunnieHop&app_id="
-    )));
-    let success = decode(
-      url
-        .split("success_url=")
-        .nth(1)
-        .unwrap()
-        .split('&')
-        .next()
-        .unwrap(),
+    assert!(!url.contains("authorize-application.php"));
+    let start = format!(
+      "https://bunniehop.party/connect/wp-start#site={}&state=",
+      crate::uploaders::ghost::urlencode(&base)
     );
-    assert!(success.starts_with("https://bunniehop.party/connect/return?provider=wordpress&state="));
-    assert!(success.ends_with("&port=17333"));
-    let state = success
+    assert!(url.starts_with(&start), "{url}");
+    assert!(url.ends_with("&port=17333"));
+    let state = url
       .split("state=")
       .nth(1)
       .unwrap()
@@ -1323,7 +1597,12 @@ mod tests {
     assert!(b["message"].as_str().unwrap().contains("Bluesky handle"));
     let (s, b) = send(
       &app,
-      req("POST", "/v1/connections/tiktok", Some(&t), Some(json!({}))),
+      req(
+        "POST",
+        "/v1/connections/snapchat",
+        Some(&t),
+        Some(json!({})),
+      ),
     )
     .await;
     assert_eq!(
@@ -1332,5 +1611,260 @@ mod tests {
     );
     let (s, _) = send(&app, req("GET", "/v1/connections", None, None)).await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
+  }
+}
+
+#[cfg(test)]
+mod telegram_http_tests {
+  use super::*;
+  use axum::{body::Body, http::Request};
+  use http_body_util::BodyExt;
+  use std::{
+    io::Write,
+    sync::{Arc, Mutex},
+  };
+  use tower::ServiceExt;
+
+  #[derive(Clone, Default)]
+  struct Capture(Arc<Mutex<Vec<u8>>>);
+  impl Write for Capture {
+    fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+      self.0.lock().unwrap().extend_from_slice(b);
+      Ok(b.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+      Ok(())
+    }
+  }
+  impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Capture {
+    type Writer = Self;
+    fn make_writer(&'a self) -> Self {
+      self.clone()
+    }
+  }
+  async fn seed(
+    st: &AppState,
+    two_factor: bool,
+  ) -> (String, tokio::sync::oneshot::Receiver<Connection>) {
+    let state = new_state();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    st.connections.telegram.jobs.lock().await.insert(
+      state.clone(),
+      TelegramJob {
+        flow: crate::uploaders::telegram_user::SignIn::new(
+          crate::uploaders::telegram_user::flow_tests::local_test_api(two_factor),
+        ),
+        done: tx,
+        created: std::time::Instant::now(),
+      },
+    );
+    (state, rx)
+  }
+  async fn step(app: &Router, state: &str, stage: &str, value: &str) -> (StatusCode, Value) {
+    let response = app
+      .clone()
+      .oneshot(
+        Request::builder()
+          .method("POST")
+          .uri(TELEGRAM_STEP)
+          .header("host", "127.0.0.1:17333")
+          .header("origin", "http://127.0.0.1:17333")
+          .header("authorization", format!("Bearer {state}"))
+          .header("content-type", "application/json")
+          .body(Body::from(json!({"stage":stage,"value":value}).to_string()))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    let status = response.status();
+    assert!(response
+      .headers()
+      .get("access-control-allow-origin")
+      .is_none());
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    (status, serde_json::from_slice(&bytes).unwrap())
+  }
+
+  #[tokio::test]
+  async fn telegram_local_http_sign_in_never_leaks_credentials_to_logs_errors_or_files() {
+    for two_factor in [false, true] {
+      let dir = tempfile::tempdir().unwrap();
+      let st = crate::server::test_state(dir.path(), Arc::new(|_| {}), Arc::new(|_| {}));
+      let (state, done) = seed(&st, two_factor).await;
+      let app = crate::server::router(st.clone());
+      let logs = Capture::default();
+      let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .without_time()
+        .with_writer(logs.clone())
+        .finish();
+      let _capture = tracing::subscriber::set_default(subscriber);
+      assert_eq!(
+        step(&app, &state, "phone", "+15551234567").await,
+        (StatusCode::OK, json!({"stage":"code","channels":[]}))
+      );
+      let (status, next) = step(&app, &state, "code", "123456").await;
+      assert_eq!(status, StatusCode::OK);
+      if two_factor {
+        assert_eq!(next["stage"], "password");
+        assert_eq!(
+          step(&app, &state, "password", "two-factor-secret").await.1["stage"],
+          "channel"
+        );
+      } else {
+        assert_eq!(next["stage"], "channel");
+      }
+      assert_eq!(step(&app, &state, "channel", "7").await.1["stage"], "done");
+      let connection = done.await.unwrap();
+      let ledger = crate::posted::Posted::open(dir.path().join("posted.json"));
+      let key = format!("telegram|{}|source|item-1", connection.account);
+      assert!(matches!(
+        ledger.reserve(&key, "t"),
+        crate::posted::Seen::Clear
+      ));
+      ledger.finish(
+        &key,
+        Some(json!({"state":"publishedUnverified","destItemId":"42"})),
+      );
+      let replay = step(&app, &state, "password", "two-factor-secret").await;
+      assert_eq!(replay.0, StatusCode::UNAUTHORIZED);
+      let mut observable = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+      observable.push_str(&serde_json::to_string(&connection).unwrap());
+      observable.push_str(&st.connections.secret(&connection.id).unwrap().to_string());
+      observable.push_str(&replay.1.to_string());
+      for file in std::fs::read_dir(dir.path()).unwrap().flatten() {
+        if file.file_type().unwrap().is_file() {
+          observable.push_str(&std::fs::read_to_string(file.path()).unwrap());
+        }
+      }
+      for secret in ["+15551234567", "123456", "two-factor-secret"] {
+        assert!(!observable.contains(secret), "sign-in credential leaked");
+      }
+      assert!(st.connections.telegram.jobs.lock().await.is_empty());
+    }
+  }
+
+  #[tokio::test]
+  async fn telegram_bootstrap_requires_capability_and_direct_browser_navigation() {
+    let dir = tempfile::tempdir().unwrap();
+    let st = crate::server::test_state(dir.path(), Arc::new(|_| {}), Arc::new(|_| {}));
+    let (state, _done) = seed(&st, false).await;
+    let app = crate::server::router(st);
+    for (origin, site, mode, dest, cap, status) in [
+      (None, "none", "navigate", "document", true, 200),
+      (None, "cross-site", "navigate", "document", true, 403),
+      (
+        Some(crate::server::PROD_ORIGIN),
+        "cross-site",
+        "navigate",
+        "document",
+        true,
+        403,
+      ),
+      (
+        Some("https://elsewhere.example"),
+        "cross-site",
+        "navigate",
+        "document",
+        true,
+        403,
+      ),
+      (None, "none", "cors", "empty", true, 403),
+      (None, "", "", "", true, 403),
+      (None, "none", "navigate", "document", false, 401),
+    ] {
+      let mut request = Request::builder()
+        .uri(format!(
+          "{TELEGRAM_PAGE}?state={}",
+          if cap { &state } else { "invalid" }
+        ))
+        .header("host", "127.0.0.1:17333")
+        .header("sec-fetch-site", site)
+        .header("sec-fetch-mode", mode)
+        .header("sec-fetch-dest", dest);
+      if let Some(o) = origin {
+        request = request.header("origin", o);
+      }
+      let response = app
+        .clone()
+        .oneshot(request.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+      assert_eq!(
+        response.status().as_u16(),
+        status,
+        "{origin:?} {site} {cap}"
+      );
+      if status == 200 {
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        assert_eq!(response.headers()["referrer-policy"], "no-referrer");
+        assert!(response.headers()["content-security-policy"]
+          .to_str()
+          .unwrap()
+          .contains("frame-ancestors 'none'"));
+        let html = String::from_utf8(
+          response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec(),
+        )
+        .unwrap();
+        assert!(html.contains("type=\"tel\""));
+        assert!(!html.contains("api_hash") && !html.contains("api_id"));
+      }
+    }
+  }
+
+  #[tokio::test]
+  async fn telegram_local_sign_in_rejects_wrong_host_expired_capability_and_website_credentials() {
+    let dir = tempfile::tempdir().unwrap();
+    let st = crate::server::test_state(dir.path(), Arc::new(|_| {}), Arc::new(|_| {}));
+    let (state, _done) = seed(&st, false).await;
+    let app = crate::server::router(st.clone());
+    for host in [
+      "localhost:17333",
+      "127.0.0.1:17334",
+      "elsewhere.example:17333",
+    ] {
+      let response = app
+        .clone()
+        .oneshot(
+          Request::builder()
+            .method("POST")
+            .uri(TELEGRAM_STEP)
+            .header("host", host)
+            .header("origin", "http://127.0.0.1:17333")
+            .header("authorization", format!("Bearer {state}"))
+            .header("content-type", "application/json")
+            .body(Body::from("{} "))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+      assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+    st.connections
+      .telegram
+      .jobs
+      .lock()
+      .await
+      .get_mut(&state)
+      .unwrap()
+      .created = std::time::Instant::now() - crate::uploaders::telegram_user::SIGN_IN_TTL;
+    assert_eq!(
+      step(&app, &state, "phone", "+15551234567").await.0,
+      StatusCode::UNAUTHORIZED
+    );
+    let result = telegram_connect(
+      &st,
+      &HashMap::from([("phone".into(), "+15551234567".into())]),
+    )
+    .await
+    .unwrap_err();
+    assert!(!format!("{result:?}").contains("+15551234567"));
+    assert_eq!(result.code, "notSupported");
   }
 }

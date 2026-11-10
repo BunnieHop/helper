@@ -29,6 +29,70 @@ pub struct Posted {
   map: Mutex<(HashMap<String, Value>, HashSet<String>)>,
 }
 
+/// Provider upload handles, separate from the duplicate ledger but in the same local directory.
+/// A create-new marker is durable before the first mutation. Any existing marker means read-back
+/// only, including malformed state. No token, media or credential is stored here.
+pub struct UploadHandles {
+  dir: PathBuf,
+}
+
+impl UploadHandles {
+  pub fn new(dir: PathBuf) -> Self {
+    Self { dir }
+  }
+
+  fn path(&self, key: &str) -> PathBuf {
+    self
+      .dir
+      .join(format!("{}.json", crate::sigv4::sha256_hex(key.as_bytes())))
+  }
+
+  pub fn load(&self, key: &str) -> std::io::Result<Option<Value>> {
+    match std::fs::read(self.path(key)) {
+      Ok(bytes) => serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(std::io::Error::other),
+      Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+      Err(e) => Err(e),
+    }
+  }
+
+  pub fn begin(&self, key: &str, kind: &str) -> std::io::Result<bool> {
+    use std::io::Write;
+    std::fs::create_dir_all(&self.dir)?;
+    crate::config::restrict(&self.dir)?;
+    let path = self.path(key);
+    let mut file = match std::fs::OpenOptions::new()
+      .write(true)
+      .create_new(true)
+      .open(&path)
+    {
+      Ok(f) => f,
+      Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(false),
+      Err(e) => return Err(e),
+    };
+    crate::config::restrict(&path)?;
+    file.write_all(
+      json!({"kind":kind,"stage":"starting"})
+        .to_string()
+        .as_bytes(),
+    )?;
+    file.sync_all()?;
+    Ok(true)
+  }
+
+  /// Only for an uploader that knows nothing it created can publish by itself
+  /// (an unpublished Threads container), so a later deliberate hop may start fresh.
+  pub fn release(&self, key: &str) {
+    let _ = std::fs::remove_file(self.path(key));
+  }
+
+  pub fn save(&self, key: &str, handle: &Value) -> std::io::Result<()> {
+    crate::vault::write_atomic(&self.path(key), handle.to_string().as_bytes())?;
+    crate::config::restrict(&self.path(key))
+  }
+}
+
 impl Posted {
   pub fn open(file: PathBuf) -> Self {
     let map = std::fs::read_to_string(&file)
@@ -97,12 +161,24 @@ impl Posted {
     self.write(map);
   }
 
+  /// Used only after the queue knows no publishing request started.
+  pub fn discard_upload(&self, key: &str) {
+    if let Some(dir) = self.file.parent() {
+      let handles = UploadHandles::new(dir.join("upload-handles"));
+      let _ = std::fs::remove_file(handles.path(key));
+    }
+  }
+
   /// The creator asked to post again on purpose.
   pub fn forget(&self, key: &str) {
     let mut g = self.lock();
     let (map, live) = &mut *g;
     if !live.contains(key) && map.remove(key).is_some() {
       self.write(map);
+      if let Some(dir) = self.file.parent() {
+        let handles = UploadHandles::new(dir.join("upload-handles"));
+        let _ = std::fs::remove_file(handles.path(key));
+      }
     }
   }
 }
@@ -132,5 +208,33 @@ mod tests {
     assert!(matches!(p.reserve("k2", "t"), Seen::Clear));
     p.forget("k1");
     assert!(matches!(p.reserve("k1", "t"), Seen::Clear));
+  }
+
+  #[test]
+  fn upload_handles_survive_restart_and_a_second_begin_cannot_publish_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = UploadHandles::new(dir.path().join("uploads"));
+    assert!(h.begin("k", "video").unwrap());
+    h.save(
+      "k",
+      &json!({"kind":"video","stage":"finishing","id":"1","session":"s"}),
+    )
+    .unwrap();
+    let restarted = UploadHandles::new(dir.path().join("uploads"));
+    assert!(!restarted.begin("k", "video").unwrap());
+    assert_eq!(restarted.load("k").unwrap().unwrap()["id"], "1");
+    std::fs::write(restarted.path("k"), b"broken").unwrap();
+    assert!(restarted.load("k").is_err());
+    assert!(!restarted.begin("k", "video").unwrap());
+  }
+
+  #[test]
+  fn stopping_before_publish_discards_the_upload_marker() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = Posted::open(dir.path().join("posted.json"));
+    let handles = UploadHandles::new(dir.path().join("upload-handles"));
+    handles.begin("k", "video").unwrap();
+    p.discard_upload("k");
+    assert!(handles.load("k").unwrap().is_none());
   }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "bunniehop-helper"
-version = "0.1.0"
+version = "0.2.0"
 description = "BunnieHop Helper: downloads and posts as you, on your computer."
 license = "AGPL-3.0-or-later"
 authors = ["BunnieHop contributors", "Jelle Glebbeek (youtube-dl-gui)"]
@@ -33,6 +33,10 @@ dirs = "6"
 time = { version = "0.3", features = ["formatting", "parsing", "serde", "macros"] }
 reqwest = { version = "0.13", features = ["json", "stream", "form", "multipart", "query"] }
 futures-util = "0.3"
+grammers-client = "=0.12.0"
+grammers-mtsender = "=0.12.0"
+grammers-session = { version = "=0.12.0", default-features = false, features = ["serde"] }
+grammers-tl-types = { version = "=0.12.0", features = ["impl-serde"] }
 zip = { version = "8.1.0", default-features = false, features = ["deflate"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 p256 = { version = "0.14", default-features = false, features = ["ecdsa", "std"] }

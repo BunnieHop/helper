@@ -223,7 +223,80 @@ pub fn router(state: AppState) -> Router {
       )
     })
     .layer(middleware::from_fn_with_state(state.clone(), guard))
+    .with_state(state.clone())
+    .merge(telegram_router(state))
+}
+
+/// Telegram has a separate router and guard. The existing web API guard is unchanged.
+fn telegram_router(state: AppState) -> Router {
+  crate::connect::telegram_routes()
+    .layer(middleware::from_fn_with_state(
+      state.clone(),
+      telegram_guard,
+    ))
     .with_state(state)
+}
+
+async fn telegram_guard(State(st): State<AppState>, req: Request, next: Next) -> Response {
+  let origin = req
+    .headers()
+    .get(header::ORIGIN)
+    .and_then(|v| v.to_str().ok());
+  let local = format!("http://127.0.0.1:{}", st.port);
+  // The paired request opens the first page as a top-level browser navigation. It has no
+  // Origin header; Fetch Metadata and the one-time capability restrict this bootstrap.
+  // All API requests require the page's exact origin. No CORS permissions are returned.
+  let navigation = req.uri().path() == crate::connect::TELEGRAM_PAGE
+    && req.method() == Method::GET
+    && origin.is_none()
+    && req
+      .headers()
+      .get("sec-fetch-site")
+      .is_some_and(|v| v == "none")
+    && req
+      .headers()
+      .get("sec-fetch-mode")
+      .is_some_and(|v| v == "navigate")
+    && req
+      .headers()
+      .get("sec-fetch-dest")
+      .is_some_and(|v| v == "document");
+  let host = req
+    .headers()
+    .get(header::HOST)
+    .and_then(|v| v.to_str().ok());
+  if host != Some(format!("127.0.0.1:{}", st.port).as_str())
+    || !(origin == Some(local.as_str()) || navigation)
+  {
+    return ApiError::new(
+      StatusCode::FORBIDDEN,
+      "originNotAllowed",
+      "Use the Helper's local Telegram sign-in page.",
+    )
+    .into_response();
+  }
+  let capability = crate::connect::telegram_capability(&req).unwrap_or_default();
+  if !st.connections.telegram.active(&capability).await {
+    return ApiError::new(
+      StatusCode::UNAUTHORIZED,
+      "signInRequired",
+      "This Telegram sign-in expired. Start again from BunnieHop.",
+    )
+    .into_response();
+  }
+  let mut response = next.run(req).await;
+  let h = response.headers_mut();
+  h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+  h.insert(
+    header::REFERRER_POLICY,
+    HeaderValue::from_static("no-referrer"),
+  );
+  h.insert(
+    "x-content-type-options",
+    HeaderValue::from_static("nosniff"),
+  );
+  h.insert("content-security-policy",HeaderValue::from_static("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"));
+  response
 }
 
 /// Origin + Host checks, CORS and Private Network Access, before any handler runs.
@@ -424,6 +497,9 @@ async fn capabilities(_t: PairedToken) -> impl IntoResponse {
     // no transform is wired into hops yet, so having ffmpeg doesn't mean BunnieHop edits video
     "canTransform": false,
     "canDriveBrowser": false,
+    // self-hosted WordPress opens bunniehop.party/connect/wp-start, never WordPress directly (D-120);
+    // the web app keeps the O-020 pause for a Helper that doesn't say this
+    "wordpressStartPage": true,
   }))
 }
 
@@ -1217,6 +1293,8 @@ esac
     assert_eq!(s, StatusCode::OK);
     assert_eq!(b["kind"], "helper");
     assert_eq!(b["canTransform"], false, "no promise of video edits");
+    // the web app lifts the O-020 pause only for a Helper that says this (D-120)
+    assert_eq!(b["wordpressStartPage"], true);
     assert!(b["sources"].as_array().unwrap().contains(&json!("youtube")));
     let d: Vec<_> = b["destinations"]
       .as_array()
@@ -1225,7 +1303,7 @@ esac
       .map(|d| d["platform"].as_str().unwrap())
       .collect();
     assert_eq!(d, crate::connect::PLATFORMS);
-    assert!(!d.contains(&"tiktok"), "no uploader yet → not offered");
+    assert!(!d.contains(&"snapchat"), "no uploader yet → not offered");
     let (_, _, b) = send(
       &f.app,
       req("GET", "/v1/status", Some(PROD_ORIGIN), Some(&t), None),
@@ -1340,5 +1418,50 @@ esac
   fn pairing_dev_origins_only_in_dev_builds() {
     assert_eq!(allowed_origins(false), vec![PROD_ORIGIN.to_string()]);
     assert!(allowed_origins(true).contains(&"http://localhost:5173".to_string()));
+  }
+}
+
+#[cfg(test)]
+mod telegram_guard_tests {
+  use super::*;
+  use axum::{body::Body, http::Request};
+  use tower::ServiceExt;
+
+  #[tokio::test]
+  async fn telegram_local_origin_table_preserves_existing_guards() {
+    let dir = tempfile::tempdir().unwrap();
+    let st = test_state(dir.path(), Arc::new(|_| {}), Arc::new(|_| {}));
+    let app = router(st);
+    for (path, origin, status) in [
+      ("/telegram/step", Some("http://127.0.0.1:17333"), 401),
+      ("/telegram/step", Some(PROD_ORIGIN), 403),
+      ("/telegram/step", Some("https://elsewhere.example"), 403),
+      ("/telegram/step", Some("http://localhost:17333"), 403),
+      ("/telegram/step", Some("http://127.0.0.1:17334"), 403),
+      ("/telegram/step", None, 403),
+      ("/v1/hello", Some(PROD_ORIGIN), 200),
+      ("/v1/hello", Some("http://127.0.0.1:17333"), 403),
+      ("/v1/hello", Some("https://elsewhere.example"), 403),
+      ("/v1/hello", None, 403),
+    ] {
+      let mut r = Request::builder()
+        .method(if path.ends_with("step") {
+          "POST"
+        } else {
+          "GET"
+        })
+        .uri(path)
+        .header("host", "127.0.0.1:17333")
+        .header("content-type", "application/json");
+      if let Some(o) = origin {
+        r = r.header("origin", o);
+      }
+      let res = app
+        .clone()
+        .oneshot(r.body(Body::from("{} ")).unwrap())
+        .await
+        .unwrap();
+      assert_eq!(res.status().as_u16(), status, "{path} {origin:?}");
+    }
   }
 }
