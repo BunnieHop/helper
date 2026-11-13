@@ -169,6 +169,52 @@ impl Posted {
     }
   }
 
+  /// Every entry, reservations included (`GET /v1/ledger`, D-082).
+  pub fn entries(&self) -> HashMap<String, Value> {
+    self.lock().0.clone()
+  }
+
+  /// Takes in another engine's entries (the browser's, D-082). Only ledger fields are kept. A
+  /// reservation without a result comes in as `publishedUnverified` (it may have gone out). An
+  /// entry never moves down (`published` > `publishedUnverified` > reserved), and a post this run
+  /// is making is left to finish. Returns how many entries changed.
+  pub fn merge(&self, incoming: &HashMap<String, Value>) -> usize {
+    let rank = |e: &Value| match e["state"].as_str() {
+      Some("published") => 3,
+      Some("publishedUnverified") => 2,
+      Some("reserved") => 1,
+      _ => 0,
+    };
+    let mut g = self.lock();
+    let (map, live) = &mut *g;
+    let mut changed = 0;
+    for (key, e) in incoming {
+      if key.len() > 1024 || key.matches('|').count() < 3 || live.contains(key) {
+        continue;
+      }
+      let state = match e["state"].as_str() {
+        Some(s @ ("published" | "publishedUnverified")) => s,
+        Some("reserved") => "publishedUnverified",
+        _ => continue,
+      };
+      let mut clean = json!({ "state": state });
+      for f in ["at", "destUrl", "destItemId", "verifiedAt"] {
+        if let Some(v) = e[f].as_str().filter(|v| v.len() <= 2048) {
+          clean[f] = json!(v);
+        }
+      }
+      if map.get(key).is_some_and(|old| rank(old) >= rank(&clean)) {
+        continue;
+      }
+      map.insert(key.clone(), clean);
+      changed += 1;
+    }
+    if changed > 0 {
+      self.write(map);
+    }
+    changed
+  }
+
   /// The creator asked to post again on purpose.
   pub fn forget(&self, key: &str) {
     let mut g = self.lock();
@@ -186,6 +232,62 @@ impl Posted {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn ledger_merge_keeps_unverified_reservations_unverified() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = dir.path().join("posted.json");
+    let p = Posted::open(f.clone());
+    assert!(matches!(p.reserve("yt|acc|export|live", "t"), Seen::Clear));
+    p.finish(
+      "yt|acc|export|done",
+      Some(json!({ "state": "published", "destUrl": "https://x/1", "at": "t" })),
+    );
+    let incoming: HashMap<String, Value> = serde_json::from_value(json!({
+      // the browser was posting it when its tab closed: maybe posted
+      "yt|acc|export|cut": { "state": "reserved", "at": "t2" },
+      // posted from the browser
+      "yt|acc|export|new": { "state": "published", "destUrl": "https://x/2", "destItemId": "2", "at": "t2", "token": "never kept" },
+      // never downgrades what the Helper knows
+      "yt|acc|export|done": { "state": "publishedUnverified", "at": "t2" },
+      // this run is posting it right now: left to finish
+      "yt|acc|export|live": { "state": "published", "destUrl": "https://x/3", "at": "t2" },
+      // not a ledger entry
+      "nonsense": { "state": "published" },
+      "yt|acc|export|odd": { "state": "deleted" },
+    }))
+    .unwrap();
+    assert_eq!(p.merge(&incoming), 2);
+    let cut = p.posted("yt|acc|export|cut").unwrap();
+    assert_eq!(cut["state"], "publishedUnverified");
+    let new = p.posted("yt|acc|export|new").unwrap();
+    assert_eq!(new["destUrl"], "https://x/2");
+    assert!(new.get("token").is_none(), "only ledger fields are kept");
+    assert_eq!(
+      p.posted("yt|acc|export|done").unwrap()["state"],
+      "published"
+    );
+    assert!(matches!(p.reserve("yt|acc|export|live", "t"), Seen::Busy));
+    assert!(p.posted("nonsense").is_none());
+    assert!(p.posted("yt|acc|export|odd").is_none());
+    // a crash reservation here is replaced by the browser's result
+    let q = Posted::open(f.clone());
+    assert!(matches!(
+      q.reserve("yt|acc|export|live", "t"),
+      Seen::Interrupted
+    ));
+    let back: HashMap<String, Value> = serde_json::from_value(
+      json!({ "yt|acc|export|live": { "state": "published", "destUrl": "https://x/3", "at": "t3" } }),
+    )
+    .unwrap();
+    let q = Posted::open(f.clone());
+    assert_eq!(q.merge(&back), 1);
+    assert_eq!(
+      Posted::open(f).posted("yt|acc|export|live").unwrap()["destUrl"],
+      "https://x/3",
+      "saved to disk"
+    );
+  }
 
   #[test]
   fn posted_ledger_survives_restart_and_tells_a_crash_from_a_live_post() {

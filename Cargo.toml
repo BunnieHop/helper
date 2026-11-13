@@ -1,6 +1,6 @@
 [package]
 name = "bunniehop-helper"
-version = "0.2.0"
+version = "0.3.0"
 description = "BunnieHop Helper: downloads and posts as you, on your computer."
 license = "AGPL-3.0-or-later"
 authors = ["BunnieHop contributors", "Jelle Glebbeek (youtube-dl-gui)"]

@@ -1,0 +1,46 @@
+{
+  "accounts": [
+    {
+      "platform": "youtube",
+      "label": "Ada Makes",
+      "stable": "UCabc123XYZ",
+      "account": "cb6a3e3ec6fb74d5c716"
+    },
+    {
+      "platform": "bluesky",
+      "label": "ada.bsky.social",
+      "stable": "did:plc:abcd1234",
+      "account": "c461b626d6c4b04d071f"
+    },
+    {
+      "platform": "discord",
+      "label": "#clips",
+      "stable": "https://discord.com/api/webhooks/1/x",
+      "account": "5ae44e83887d625bb705"
+    },
+    {
+      "platform": "wordpress",
+      "label": "Ada blog",
+      "stable": "https://ada.example.org",
+      "account": "8d996b750e8ef27b149d"
+    },
+    {
+      "platform": "dropbox",
+      "label": "Ada Lovelace",
+      "stable": null,
+      "account": "640c0166192585c4c7b0"
+    },
+    {
+      "platform": "mastodon",
+      "label": "@ada@mastodon.social",
+      "stable": null,
+      "account": "6f749ed668a8b0be70f9"
+    },
+    {
+      "platform": "youtube",
+      "label": "Café ✨ Ada",
+      "stable": null,
+      "account": "0c04ff7fbafdbed894fa"
+    }
+  ]
+}

@@ -225,6 +225,39 @@ mod tests {
   use super::*;
   use serde_json::json;
 
+  /// The browser engine keys its ledger the same way (apps/web engine-site/accounts.ts), so the
+  /// two ledgers merge (D-082). Fixture shared in packages/sidecar/fixtures/cross.
+  #[test]
+  fn account_key_matches_the_browser_engine() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mono = root.join("../../packages/sidecar/fixtures/cross");
+    let dir = if mono.is_dir() {
+      mono
+    } else {
+      root.join("fixtures/sidecar-cross")
+    };
+    let fx: Value =
+      serde_json::from_str(&std::fs::read_to_string(dir.join("accounts.json")).unwrap()).unwrap();
+    for row in fx["accounts"].as_array().unwrap() {
+      let platform = row["platform"].as_str().unwrap();
+      let field = match platform {
+        "youtube" => "channelId",
+        "bluesky" => "did",
+        _ => "url",
+      };
+      let secret = match row["stable"].as_str() {
+        Some(v) => json!({ field: v }),
+        None => json!({}),
+      };
+      assert_eq!(
+        account_key(platform, row["label"].as_str().unwrap(), &secret),
+        row["account"].as_str().unwrap(),
+        "{platform} {}",
+        row["label"]
+      );
+    }
+  }
+
   #[test]
   fn connections_keep_secrets_out_of_the_list_file() {
     let dir = tempfile::tempdir().unwrap();

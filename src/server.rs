@@ -212,6 +212,11 @@ pub fn router(state: AppState) -> Router {
       post(cell_action),
     )
     .route("/v1/stop-all", post(stop_all))
+    .route("/v1/ledger", get(ledger))
+    .route(
+      "/v1/ledger/merge",
+      post(merge_ledger).layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024)),
+    )
     .route("/v1/open-folder", post(open_folder))
     .route("/v1/events", get(events))
     .merge(crate::connect::routes())
@@ -500,6 +505,9 @@ async fn capabilities(_t: PairedToken) -> impl IntoResponse {
     // self-hosted WordPress opens bunniehop.party/connect/wp-start, never WordPress directly (D-120);
     // the web app keeps the O-020 pause for a Helper that doesn't say this
     "wordpressStartPage": true,
+    // GET /v1/ledger and POST /v1/ledger/merge exist, so the browser engine can copy this
+    // Helper's posts and hand over its own (D-082); a Helper without it has neither
+    "ledgerMerge": true,
   }))
 }
 
@@ -746,6 +754,30 @@ async fn cell_action(
 async fn stop_all(State(st): State<AppState>, _t: PairedToken) -> StatusCode {
   st.hub.stop_all();
   StatusCode::NO_CONTENT
+}
+
+/// What this Helper has posted (D11), for the browser engine to merge (D-082). Keys, states and
+/// destination links only; no credentials.
+async fn ledger(State(st): State<AppState>, _t: PairedToken) -> Json<serde_json::Value> {
+  Json(serde_json::json!({ "entries": st.hub.ledger() }))
+}
+
+#[derive(Deserialize)]
+struct LedgerBody {
+  entries: HashMap<String, serde_json::Value>,
+}
+
+/// The browser engine's posts, so a Helper hop never posts them again (D-082).
+async fn merge_ledger(
+  State(st): State<AppState>,
+  _t: PairedToken,
+  body: Result<Json<LedgerBody>, axum::extract::rejection::JsonRejection>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+  let Json(b) = body
+    .map_err(|e| ApiError::bad_request("Send the ledger entries.").with_verbatim(e.body_text()))?;
+  Ok(Json(
+    serde_json::json!({ "changed": st.hub.merge_ledger(&b.entries) }),
+  ))
 }
 
 #[derive(Deserialize)]
@@ -1278,6 +1310,28 @@ esac
   }
 
   #[tokio::test]
+  async fn capabilities_say_ledger_merge() {
+    let f = fx();
+    let t = paired(&f).await;
+    let (s, _, b) = send(
+      &f.app,
+      req("GET", "/v1/capabilities", Some(PROD_ORIGIN), Some(&t), None),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    // the web app copies ledgers both ways only with a Helper that says this (plan 2026-11-11 S5)
+    assert_eq!(b["ledgerMerge"], true);
+    // and the routes it promises answer
+    let (s, _, b) = send(
+      &f.app,
+      req("GET", "/v1/ledger", Some(PROD_ORIGIN), Some(&t), None),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(b["entries"].is_object());
+  }
+
+  #[tokio::test]
   async fn capabilities_list_only_destinations_with_an_uploader() {
     let f = fx();
     let t = paired(&f).await;
@@ -1338,6 +1392,100 @@ esac
     let (s, _, b) = send(&f.app, up(b"not a zip".to_vec())).await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
     assert!(b["message"].as_str().unwrap().contains("zip"));
+  }
+
+  #[tokio::test]
+  async fn ledger_routes_require_pairing() {
+    let f = fx();
+    let (s, _, _) = send(
+      &f.app,
+      req("GET", "/v1/ledger", Some(PROD_ORIGIN), None, None),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    let body = json!({ "entries": { "bluesky|a1|export|x": { "state": "published", "at": "t" } } });
+    let (s, _, _) = send(
+      &f.app,
+      req(
+        "POST",
+        "/v1/ledger/merge",
+        Some(PROD_ORIGIN),
+        None,
+        Some(body.clone()),
+      ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    let t = paired(&f).await;
+    let (s, _, _) = send(
+      &f.app,
+      req(
+        "GET",
+        "/v1/ledger",
+        Some("https://evil.example"),
+        Some(&t),
+        None,
+      ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    assert!(f.hub.ledger().is_empty(), "nothing merged without pairing");
+  }
+
+  #[tokio::test]
+  async fn ledger_get_lists_entries() {
+    let f = fx();
+    let t = paired(&f).await;
+    let (s, _, b) = send(
+      &f.app,
+      req("GET", "/v1/ledger", Some(PROD_ORIGIN), Some(&t), None),
+    )
+    .await;
+    assert_eq!((s, b["entries"].clone()), (StatusCode::OK, json!({})));
+    let body = json!({ "entries": {
+      "bluesky|a1|export|x": { "state": "published", "destUrl": "https://bsky.app/x", "at": "t" },
+      "bluesky|a1|export|y": { "state": "reserved", "at": "t" }
+    } });
+    let (s, _, b) = send(
+      &f.app,
+      req(
+        "POST",
+        "/v1/ledger/merge",
+        Some(PROD_ORIGIN),
+        Some(&t),
+        Some(body),
+      ),
+    )
+    .await;
+    assert_eq!((s, b["changed"].as_u64()), (StatusCode::OK, Some(2)));
+    let (_, _, b) = send(
+      &f.app,
+      req("GET", "/v1/ledger", Some(PROD_ORIGIN), Some(&t), None),
+    )
+    .await;
+    assert_eq!(
+      b["entries"]["bluesky|a1|export|x"]["destUrl"],
+      "https://bsky.app/x"
+    );
+    assert_eq!(
+      b["entries"]["bluesky|a1|export|y"]["state"],
+      "publishedUnverified"
+    );
+    let (s, _, b) = send(
+      &f.app,
+      req(
+        "POST",
+        "/v1/ledger/merge",
+        Some(PROD_ORIGIN),
+        Some(&t),
+        Some(json!({ "entries": [] })),
+      ),
+    )
+    .await;
+    assert_eq!(
+      (s, b["code"].as_str()),
+      (StatusCode::BAD_REQUEST, Some("unknown"))
+    );
   }
 
   #[tokio::test]

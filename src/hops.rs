@@ -311,6 +311,16 @@ impl Hub {
     &self.vault_dir
   }
 
+  /// The posted ledger, for the browser engine to merge (`GET /v1/ledger`, D-082).
+  pub fn ledger(&self) -> HashMap<String, Value> {
+    self.posted.entries()
+  }
+
+  /// The browser engine's posts, merged in so this Helper never posts them again (D11).
+  pub fn merge_ledger(&self, entries: &HashMap<String, Value>) -> usize {
+    self.posted.merge(entries)
+  }
+
   pub fn set_accounts(&self, a: Accounts) {
     let _ = self.accounts.set(a);
   }
@@ -2379,6 +2389,30 @@ echo "BHF|$dir/media.mp4"
       ],
       "same idempotency key, so the platform answers with the first post"
     );
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn ledger_merge_adds_browser_posts_and_helper_skips_them() {
+    let f = fx(false);
+    // the browser engine posted item a to this account before the Helper was paired
+    let browser: HashMap<String, Value> = serde_json::from_value(json!({
+      "bluesky|bluesky-1|youtube|a": { "state": "published", "destUrl": "https://bsky.app/from-browser", "at": "2026-11-09T10:00:00Z" }
+    }))
+    .unwrap();
+    assert_eq!(f.hub.merge_ledger(&browser), 1);
+    assert!(f.hub.ledger().contains_key("bluesky|bluesky-1|youtube|a"));
+    let urls = [("a", "https://www.youtube.com/watch?v=a")];
+    f.hub.start(plan(&urls, &["bluesky"])).unwrap();
+    until(&f.hub, finished).await;
+    assert!(f.fake.calls.lock().unwrap().is_empty(), "D11: nothing sent");
+    let doc: Value =
+      serde_json::from_str(&std::fs::read_to_string(f.dir.path().join("hops/hop-1.json")).unwrap())
+        .unwrap();
+    let cell = &doc["cells"]["a → bluesky"];
+    assert_eq!(cell["state"], "published");
+    assert_eq!(cell["destUrl"], "https://bsky.app/from-browser");
+    assert!(cell["alreadyPosted"].is_string());
   }
 
   #[cfg(unix)]

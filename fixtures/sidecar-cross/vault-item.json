@@ -1,0 +1,69 @@
+{
+  "//": "One export item filed into a vault, as the Helper (exports.rs extract_media + vault.rs describe) and the browser engine (engine-site/cloud/item.ts) both must. The third media has no path in the zip, so neither writes it.",
+  "item": {
+    "id": "vid-1",
+    "platform": "youtube",
+    "kind": "video",
+    "title": "Ünïcode clip: the first one",
+    "description": "",
+    "tags": [],
+    "publishedAt": "2026-03-04T10:00:00-08:00",
+    "chapters": [],
+    "captions": [],
+    "thumbnails": [],
+    "media": [
+      {
+        "kind": "video",
+        "path": "Takeout/YouTube and YouTube Music/videos/Ünïcode clip.MP4",
+        "mime": "video/mp4"
+      },
+      {
+        "kind": "image",
+        "path": "Takeout/YouTube and YouTube Music/videos/cover.jpeg"
+      },
+      {
+        "kind": "image",
+        "url": "https://example.invalid/missing.jpg"
+      }
+    ],
+    "playlists": [],
+    "comments": [],
+    "flags": {
+      "membersOnly": false,
+      "ageRestricted": false,
+      "geoBlocked": false,
+      "live": false,
+      "premiere": false,
+      "upcoming": false,
+      "repost": false,
+      "reply": false,
+      "quote": false,
+      "licensedSound": false,
+      "needsHelperFetch": false,
+      "downscaled": false
+    }
+  },
+  "handle": "creator",
+  "zipFiles": {
+    "Takeout/YouTube and YouTube Music/videos/Ünïcode clip.MP4": "clip bytes for the vault parity check",
+    "Takeout/YouTube and YouTube Music/videos/cover.jpeg": "cover bytes"
+  },
+  "folder": "youtube/creator/2026/2026-03-04_ünïcode-clip-the-first-one_vid-1",
+  "files": [
+    {
+      "role": "media",
+      "path": "media.1.mp4",
+      "sizeBytes": 37,
+      "sha256": "1f4b77b4ad99178fb4631d79652663dad2a980b1d359c5913cb059b6bffffb14"
+    },
+    {
+      "role": "media",
+      "path": "media.2.jpeg",
+      "sizeBytes": 11,
+      "sha256": "e06cc5dc61902f1ec01216ae3298216b218ad494ca253a85557ed4e44a23994b"
+    }
+  ],
+  "missing": [
+    2
+  ]
+}

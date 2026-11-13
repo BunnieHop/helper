@@ -338,6 +338,31 @@ mod tests {
     std::fs::read_to_string(dir.join(name)).unwrap()
   }
 
+  /// The browser engine files export items into a cloud vault with the same names, roles, sizes
+  /// and hashes (apps/web `cloud_vault_layout_matches_helper_sidecar`, same fixture).
+  #[test]
+  fn vault_item_files_match_the_browser_engine() {
+    let fx: Value = serde_json::from_str(&cross("vault-item.json")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let zp = dir.path().join("export.zip");
+    let entries: Vec<(String, Vec<u8>)> = fx["zipFiles"]
+      .as_object()
+      .unwrap()
+      .iter()
+      .map(|(k, v)| (k.clone(), v.as_str().unwrap().as_bytes().to_vec()))
+      .collect();
+    let refs: Vec<(&str, &[u8])> = entries
+      .iter()
+      .map(|(k, v)| (k.as_str(), v.as_slice()))
+      .collect();
+    crate::exports::tests::make_zip(&zp, &refs);
+    let dest = dir.path().join("item");
+    let missing = crate::exports::extract_media(&zp, &fx["item"], &dest).unwrap();
+    let idx: Vec<Value> = missing.iter().map(|m| m["index"].clone()).collect();
+    assert_eq!(Value::Array(idx), fx["missing"]);
+    assert_eq!(Value::Array(describe(&dest).unwrap()), fx["files"]);
+  }
+
   #[test]
   fn sidecar_merge_matches_the_typescript_package() {
     let existing: Value = serde_json::from_str(&cross("existing.json")).unwrap();
