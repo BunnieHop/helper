@@ -1253,7 +1253,10 @@ mod tests {
     } else {
       root.join("fixtures/sidecar-cross")
     };
-    std::fs::read_to_string(dir.join(name)).unwrap()
+    // a Windows checkout may turn the fixture's line endings into CRLF; the file format is LF
+    std::fs::read_to_string(dir.join(name))
+      .unwrap()
+      .replace("\r\n", "\n")
   }
 
   fn rec(sha: Option<&str>, at: &str) -> SeenRec {
