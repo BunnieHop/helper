@@ -20,6 +20,7 @@ pub mod server;
 pub mod sigv4;
 pub mod uploaders;
 pub mod vault;
+pub mod works;
 pub mod ytdlp;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

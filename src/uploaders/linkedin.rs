@@ -535,6 +535,7 @@ mod tests {
         post: Some(&post),
         media: &[v],
         idempotency_key: "h:v1:linkedin",
+        work_id: None,
         options: &json!({}),
       })
       .await
@@ -584,6 +585,7 @@ mod tests {
         post: None,
         media: &[],
         idempotency_key: "k",
+        work_id: None,
         options: &json!({}),
       })
       .await

@@ -1,0 +1,669 @@
+{
+  "cases": [
+    {
+      "name": "a split survives a stale copy that still holds the pair",
+      "inputs": [
+        {
+          "format": "bunniehop.works",
+          "version": 1,
+          "device": "a0a0a0a0-0000-4000-8000-00000000000a",
+          "updatedAt": "2026-11-01T03:00:00Z",
+          "works": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "createdAt": "2026-11-01T01:00:00Z",
+              "absorbed": [],
+              "members": [
+                {
+                  "platform": "youtube",
+                  "id": "yt-a",
+                  "via": "sha256",
+                  "addedAt": "2026-11-01T02:00:00Z"
+                },
+                {
+                  "platform": "instagram",
+                  "id": "ig-c",
+                  "via": "sha256",
+                  "addedAt": "2026-11-01T01:00:00Z"
+                }
+              ]
+            }
+          ],
+          "different": [
+            {
+              "a": {
+                "platform": "youtube",
+                "id": "yt-a"
+              },
+              "b": {
+                "platform": "tiktok",
+                "id": "tt-b"
+              },
+              "at": "2026-11-01T03:00:00Z"
+            },
+            {
+              "a": {
+                "platform": "instagram",
+                "id": "ig-c"
+              },
+              "b": {
+                "platform": "tiktok",
+                "id": "tt-b"
+              },
+              "at": "2026-11-01T03:00:00Z"
+            }
+          ],
+          "seen": {}
+        },
+        {
+          "format": "bunniehop.works",
+          "version": 1,
+          "device": "b0b0b0b0-0000-4000-8000-00000000000b",
+          "updatedAt": "2026-11-01T02:00:00Z",
+          "works": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "createdAt": "2026-11-01T01:00:00Z",
+              "absorbed": [],
+              "members": [
+                {
+                  "platform": "youtube",
+                  "id": "yt-a",
+                  "via": "sha256",
+                  "addedAt": "2026-11-01T02:00:00Z"
+                },
+                {
+                  "platform": "tiktok",
+                  "id": "tt-b",
+                  "via": "sha256",
+                  "addedAt": "2026-11-01T01:00:00Z"
+                },
+                {
+                  "platform": "instagram",
+                  "id": "ig-c",
+                  "via": "sha256",
+                  "addedAt": "2026-11-01T01:00:00Z"
+                }
+              ]
+            }
+          ],
+          "different": [],
+          "seen": {}
+        }
+      ],
+      "device": "a0a0a0a0-0000-4000-8000-00000000000a",
+      "updatedAt": "2026-11-01T09:00:00Z",
+      "expected": {
+        "format": "bunniehop.works",
+        "version": 1,
+        "device": "a0a0a0a0-0000-4000-8000-00000000000a",
+        "updatedAt": "2026-11-01T09:00:00Z",
+        "works": [
+          {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "createdAt": "2026-11-01T01:00:00Z",
+            "absorbed": [],
+            "members": [
+              {
+                "platform": "instagram",
+                "id": "ig-c",
+                "via": "sha256",
+                "addedAt": "2026-11-01T01:00:00Z"
+              },
+              {
+                "platform": "youtube",
+                "id": "yt-a",
+                "via": "sha256",
+                "addedAt": "2026-11-01T02:00:00Z"
+              }
+            ]
+          }
+        ],
+        "different": [
+          {
+            "a": {
+              "platform": "instagram",
+              "id": "ig-c"
+            },
+            "b": {
+              "platform": "tiktok",
+              "id": "tt-b"
+            },
+            "at": "2026-11-01T03:00:00Z"
+          },
+          {
+            "a": {
+              "platform": "youtube",
+              "id": "yt-a"
+            },
+            "b": {
+              "platform": "tiktok",
+              "id": "tt-b"
+            },
+            "at": "2026-11-01T03:00:00Z"
+          }
+        ],
+        "seen": {}
+      }
+    },
+    {
+      "name": "works sharing a member merge, the older id survives and absorbs the other",
+      "inputs": [
+        {
+          "format": "bunniehop.works",
+          "version": 1,
+          "device": "a0a0a0a0-0000-4000-8000-00000000000a",
+          "updatedAt": "2026-11-01T01:00:00Z",
+          "works": [
+            {
+              "id": "22222222-2222-4222-8222-222222222222",
+              "createdAt": "2026-11-01T01:00:00Z",
+              "absorbed": [],
+              "members": [
+                {
+                  "platform": "youtube",
+                  "id": "yt-a",
+                  "via": "sha256",
+                  "addedAt": "2026-11-01T01:00:00Z"
+                },
+                {
+                  "platform": "tiktok",
+                  "id": "tt-b",
+                  "via": "sha256",
+                  "addedAt": "2026-11-01T01:00:00Z"
+                }
+              ]
+            }
+          ],
+          "different": [],
+          "seen": {}
+        },
+        {
+          "format": "bunniehop.works",
+          "version": 1,
+          "device": "b0b0b0b0-0000-4000-8000-00000000000b",
+          "updatedAt": "2026-11-01T02:00:00Z",
+          "works": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "createdAt": "2026-11-01T02:00:00Z",
+              "absorbed": [],
+              "members": [
+                {
+                  "platform": "tiktok",
+                  "id": "tt-b",
+                  "via": "sha256",
+                  "addedAt": "2026-11-01T02:00:00Z"
+                },
+                {
+                  "platform": "instagram",
+                  "id": "ig-c",
+                  "via": "sha256",
+                  "addedAt": "2026-11-01T02:00:00Z"
+                }
+              ]
+            }
+          ],
+          "different": [],
+          "seen": {}
+        }
+      ],
+      "device": "a0a0a0a0-0000-4000-8000-00000000000a",
+      "updatedAt": "2026-11-01T09:00:00Z",
+      "expected": {
+        "format": "bunniehop.works",
+        "version": 1,
+        "device": "a0a0a0a0-0000-4000-8000-00000000000a",
+        "updatedAt": "2026-11-01T09:00:00Z",
+        "works": [
+          {
+            "id": "22222222-2222-4222-8222-222222222222",
+            "createdAt": "2026-11-01T01:00:00Z",
+            "absorbed": [
+              "11111111-1111-4111-8111-111111111111"
+            ],
+            "members": [
+              {
+                "platform": "instagram",
+                "id": "ig-c",
+                "via": "sha256",
+                "addedAt": "2026-11-01T02:00:00Z"
+              },
+              {
+                "platform": "tiktok",
+                "id": "tt-b",
+                "via": "sha256",
+                "addedAt": "2026-11-01T02:00:00Z"
+              },
+              {
+                "platform": "youtube",
+                "id": "yt-a",
+                "via": "sha256",
+                "addedAt": "2026-11-01T01:00:00Z"
+              }
+            ]
+          }
+        ],
+        "different": [],
+        "seen": {}
+      }
+    },
+    {
+      "name": "a creator Same video newer than the pair keeps both",
+      "inputs": [
+        {
+          "format": "bunniehop.works",
+          "version": 1,
+          "device": "a0a0a0a0-0000-4000-8000-00000000000a",
+          "updatedAt": "2026-11-01T05:00:00Z",
+          "works": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "createdAt": "2026-11-01T01:00:00Z",
+              "absorbed": [],
+              "members": [
+                {
+                  "platform": "youtube",
+                  "id": "yt-a",
+                  "via": "sha256",
+                  "addedAt": "2026-11-01T01:00:00Z"
+                },
+                {
+                  "platform": "tiktok",
+                  "id": "tt-b",
+                  "via": "creator",
+                  "addedAt": "2026-11-01T05:00:00Z"
+                }
+              ]
+            }
+          ],
+          "different": [
+            {
+              "a": {
+                "platform": "youtube",
+                "id": "yt-a"
+              },
+              "b": {
+                "platform": "tiktok",
+                "id": "tt-b"
+              },
+              "at": "2026-11-01T03:00:00Z"
+            }
+          ],
+          "seen": {}
+        },
+        {
+          "format": "bunniehop.works",
+          "version": 1,
+          "device": "b0b0b0b0-0000-4000-8000-00000000000b",
+          "updatedAt": "2026-11-01T03:00:00Z",
+          "works": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "createdAt": "2026-11-01T01:00:00Z",
+              "absorbed": [],
+              "members": [
+                {
+                  "platform": "youtube",
+                  "id": "yt-a",
+                  "via": "sha256",
+                  "addedAt": "2026-11-01T01:00:00Z"
+                }
+              ]
+            }
+          ],
+          "different": [
+            {
+              "a": {
+                "platform": "youtube",
+                "id": "yt-a"
+              },
+              "b": {
+                "platform": "tiktok",
+                "id": "tt-b"
+              },
+              "at": "2026-11-01T03:00:00Z"
+            }
+          ],
+          "seen": {}
+        }
+      ],
+      "device": "a0a0a0a0-0000-4000-8000-00000000000a",
+      "updatedAt": "2026-11-01T09:00:00Z",
+      "expected": {
+        "format": "bunniehop.works",
+        "version": 1,
+        "device": "a0a0a0a0-0000-4000-8000-00000000000a",
+        "updatedAt": "2026-11-01T09:00:00Z",
+        "works": [
+          {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "createdAt": "2026-11-01T01:00:00Z",
+            "absorbed": [],
+            "members": [
+              {
+                "platform": "tiktok",
+                "id": "tt-b",
+                "via": "creator",
+                "addedAt": "2026-11-01T05:00:00Z"
+              },
+              {
+                "platform": "youtube",
+                "id": "yt-a",
+                "via": "sha256",
+                "addedAt": "2026-11-01T01:00:00Z"
+              }
+            ]
+          }
+        ],
+        "different": [
+          {
+            "a": {
+              "platform": "youtube",
+              "id": "yt-a"
+            },
+            "b": {
+              "platform": "tiktok",
+              "id": "tt-b"
+            },
+            "at": "2026-11-01T03:00:00Z"
+          }
+        ],
+        "seen": {}
+      }
+    },
+    {
+      "name": "absorbed closes transitively across three copies",
+      "inputs": [
+        {
+          "format": "bunniehop.works",
+          "version": 1,
+          "device": "a0a0a0a0-0000-4000-8000-00000000000a",
+          "updatedAt": "2026-11-01T04:00:00Z",
+          "works": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "createdAt": "2026-11-01T01:00:00Z",
+              "absorbed": [
+                "22222222-2222-4222-8222-222222222222"
+              ],
+              "members": [
+                {
+                  "platform": "youtube",
+                  "id": "yt-a",
+                  "via": "sha256",
+                  "addedAt": "2026-11-01T01:00:00Z"
+                },
+                {
+                  "platform": "tiktok",
+                  "id": "tt-b",
+                  "via": "sha256",
+                  "addedAt": "2026-11-01T01:00:00Z"
+                }
+              ]
+            }
+          ],
+          "different": [],
+          "seen": {}
+        },
+        {
+          "format": "bunniehop.works",
+          "version": 1,
+          "device": "b0b0b0b0-0000-4000-8000-00000000000b",
+          "updatedAt": "2026-11-01T03:00:00Z",
+          "works": [
+            {
+              "id": "22222222-2222-4222-8222-222222222222",
+              "createdAt": "2026-11-01T02:00:00Z",
+              "absorbed": [
+                "33333333-3333-4333-8333-333333333333"
+              ],
+              "members": [
+                {
+                  "platform": "instagram",
+                  "id": "ig-c",
+                  "via": "sha256",
+                  "addedAt": "2026-11-01T02:00:00Z"
+                },
+                {
+                  "platform": "youtube",
+                  "id": "yt-d",
+                  "via": "sha256",
+                  "addedAt": "2026-11-01T02:00:00Z"
+                }
+              ]
+            }
+          ],
+          "different": [],
+          "seen": {}
+        },
+        {
+          "format": "bunniehop.works",
+          "version": 1,
+          "device": "c0c0c0c0-0000-4000-8000-00000000000c",
+          "updatedAt": "2026-11-01T02:00:00Z",
+          "works": [
+            {
+              "id": "33333333-3333-4333-8333-333333333333",
+              "createdAt": "2026-11-01T02:00:00Z",
+              "absorbed": [],
+              "members": [
+                {
+                  "platform": "tiktok",
+                  "id": "tt-e",
+                  "via": "sha256",
+                  "addedAt": "2026-11-01T02:00:00Z"
+                },
+                {
+                  "platform": "instagram",
+                  "id": "ig-f",
+                  "via": "sha256",
+                  "addedAt": "2026-11-01T02:00:00Z"
+                }
+              ]
+            }
+          ],
+          "different": [],
+          "seen": {}
+        }
+      ],
+      "device": "a0a0a0a0-0000-4000-8000-00000000000a",
+      "updatedAt": "2026-11-01T09:00:00Z",
+      "expected": {
+        "format": "bunniehop.works",
+        "version": 1,
+        "device": "a0a0a0a0-0000-4000-8000-00000000000a",
+        "updatedAt": "2026-11-01T09:00:00Z",
+        "works": [
+          {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "createdAt": "2026-11-01T01:00:00Z",
+            "absorbed": [
+              "22222222-2222-4222-8222-222222222222",
+              "33333333-3333-4333-8333-333333333333"
+            ],
+            "members": [
+              {
+                "platform": "instagram",
+                "id": "ig-c",
+                "via": "sha256",
+                "addedAt": "2026-11-01T02:00:00Z"
+              },
+              {
+                "platform": "instagram",
+                "id": "ig-f",
+                "via": "sha256",
+                "addedAt": "2026-11-01T02:00:00Z"
+              },
+              {
+                "platform": "tiktok",
+                "id": "tt-b",
+                "via": "sha256",
+                "addedAt": "2026-11-01T01:00:00Z"
+              },
+              {
+                "platform": "tiktok",
+                "id": "tt-e",
+                "via": "sha256",
+                "addedAt": "2026-11-01T02:00:00Z"
+              },
+              {
+                "platform": "youtube",
+                "id": "yt-a",
+                "via": "sha256",
+                "addedAt": "2026-11-01T01:00:00Z"
+              },
+              {
+                "platform": "youtube",
+                "id": "yt-d",
+                "via": "sha256",
+                "addedAt": "2026-11-01T02:00:00Z"
+              }
+            ]
+          }
+        ],
+        "different": [],
+        "seen": {}
+      }
+    },
+    {
+      "name": "a merge that brings both sides of a pair together drops side b again",
+      "inputs": [
+        {
+          "format": "bunniehop.works",
+          "version": 1,
+          "device": "a0a0a0a0-0000-4000-8000-00000000000a",
+          "updatedAt": "2026-11-01T03:00:00Z",
+          "works": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "createdAt": "2026-11-01T01:00:00Z",
+              "absorbed": [],
+              "members": [
+                {
+                  "platform": "youtube",
+                  "id": "yt-a",
+                  "via": "sha256",
+                  "addedAt": "2026-11-01T01:00:00Z"
+                },
+                {
+                  "platform": "instagram",
+                  "id": "ig-c",
+                  "via": "sha256",
+                  "addedAt": "2026-11-01T01:00:00Z"
+                }
+              ]
+            }
+          ],
+          "different": [
+            {
+              "a": {
+                "platform": "youtube",
+                "id": "yt-a"
+              },
+              "b": {
+                "platform": "tiktok",
+                "id": "tt-b"
+              },
+              "at": "2026-11-01T03:00:00Z"
+            }
+          ],
+          "seen": {
+            "youtube|yt-a": {
+              "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "durationSec": 30,
+              "seenAt": "2026-11-01T01:00:00Z"
+            }
+          }
+        },
+        {
+          "format": "bunniehop.works",
+          "version": 1,
+          "device": "b0b0b0b0-0000-4000-8000-00000000000b",
+          "updatedAt": "2026-11-01T02:00:00Z",
+          "works": [
+            {
+              "id": "22222222-2222-4222-8222-222222222222",
+              "createdAt": "2026-11-01T02:00:00Z",
+              "absorbed": [],
+              "members": [
+                {
+                  "platform": "tiktok",
+                  "id": "tt-b",
+                  "via": "sha256",
+                  "addedAt": "2026-11-01T02:00:00Z"
+                },
+                {
+                  "platform": "instagram",
+                  "id": "ig-c",
+                  "via": "sha256",
+                  "addedAt": "2026-11-01T02:00:00Z"
+                }
+              ]
+            }
+          ],
+          "different": [],
+          "seen": {
+            "youtube|yt-a": {
+              "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "title": "Clip A",
+              "seenAt": "2026-11-01T02:00:00Z"
+            }
+          }
+        }
+      ],
+      "device": "a0a0a0a0-0000-4000-8000-00000000000a",
+      "updatedAt": "2026-11-01T09:00:00Z",
+      "expected": {
+        "format": "bunniehop.works",
+        "version": 1,
+        "device": "a0a0a0a0-0000-4000-8000-00000000000a",
+        "updatedAt": "2026-11-01T09:00:00Z",
+        "works": [
+          {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "createdAt": "2026-11-01T01:00:00Z",
+            "absorbed": [
+              "22222222-2222-4222-8222-222222222222"
+            ],
+            "members": [
+              {
+                "platform": "instagram",
+                "id": "ig-c",
+                "via": "sha256",
+                "addedAt": "2026-11-01T02:00:00Z"
+              },
+              {
+                "platform": "youtube",
+                "id": "yt-a",
+                "via": "sha256",
+                "addedAt": "2026-11-01T01:00:00Z"
+              }
+            ]
+          }
+        ],
+        "different": [
+          {
+            "a": {
+              "platform": "youtube",
+              "id": "yt-a"
+            },
+            "b": {
+              "platform": "tiktok",
+              "id": "tt-b"
+            },
+            "at": "2026-11-01T03:00:00Z"
+          }
+        ],
+        "seen": {
+          "youtube|yt-a": {
+            "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "durationSec": 30,
+            "title": "Clip A",
+            "seenAt": "2026-11-01T02:00:00Z"
+          }
+        }
+      }
+    }
+  ]
+}

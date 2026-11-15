@@ -1,0 +1,377 @@
+{
+  "rule": {
+    "maxDurationGapSec": 1,
+    "minJaccard": 0.6,
+    "minWords": 4
+  },
+  "vectors": [
+    {
+      "name": "similar captions, 0.8 s apart",
+      "a": {
+        "kind": "video",
+        "durationSec": 61,
+        "title": "Morning run by the river",
+        "text": "Ten kilometres before work, cold but worth it"
+      },
+      "b": {
+        "kind": "short",
+        "durationSec": 61.8,
+        "title": "Morning run by the river",
+        "text": "ten kilometres before work https://example.org/run"
+      },
+      "wordsA": [
+        "before",
+        "but",
+        "by",
+        "cold",
+        "it",
+        "kilometres",
+        "morning",
+        "river",
+        "run",
+        "ten",
+        "the",
+        "work",
+        "worth"
+      ],
+      "wordsB": [
+        "before",
+        "by",
+        "kilometres",
+        "morning",
+        "river",
+        "run",
+        "ten",
+        "the",
+        "work"
+      ],
+      "shared": 9,
+      "union": 13,
+      "pair": true
+    },
+    {
+      "name": "equal duration, unrelated captions",
+      "a": {
+        "kind": "video",
+        "durationSec": 61,
+        "title": "Morning run by the river",
+        "text": "Ten kilometres before work, cold but worth it"
+      },
+      "b": {
+        "kind": "video",
+        "durationSec": 61,
+        "title": "Sourdough starter, day three",
+        "text": "Feeding schedule and jar sizes"
+      },
+      "wordsA": [
+        "before",
+        "but",
+        "by",
+        "cold",
+        "it",
+        "kilometres",
+        "morning",
+        "river",
+        "run",
+        "ten",
+        "the",
+        "work",
+        "worth"
+      ],
+      "wordsB": [
+        "and",
+        "day",
+        "feeding",
+        "jar",
+        "schedule",
+        "sizes",
+        "sourdough",
+        "starter",
+        "three"
+      ],
+      "shared": 0,
+      "union": 22,
+      "pair": false
+    },
+    {
+      "name": "exactly 1.0 s apart",
+      "a": {
+        "kind": "video",
+        "durationSec": 30,
+        "title": "Morning run by the river",
+        "text": "Ten kilometres before work, cold but worth it"
+      },
+      "b": {
+        "kind": "video",
+        "durationSec": 31,
+        "title": "Morning run by the river",
+        "text": "Ten kilometres before work, cold but worth it"
+      },
+      "wordsA": [
+        "before",
+        "but",
+        "by",
+        "cold",
+        "it",
+        "kilometres",
+        "morning",
+        "river",
+        "run",
+        "ten",
+        "the",
+        "work",
+        "worth"
+      ],
+      "wordsB": [
+        "before",
+        "but",
+        "by",
+        "cold",
+        "it",
+        "kilometres",
+        "morning",
+        "river",
+        "run",
+        "ten",
+        "the",
+        "work",
+        "worth"
+      ],
+      "shared": 13,
+      "union": 13,
+      "pair": true
+    },
+    {
+      "name": "1.01 s apart",
+      "a": {
+        "kind": "video",
+        "durationSec": 30,
+        "title": "Morning run by the river",
+        "text": "Ten kilometres before work, cold but worth it"
+      },
+      "b": {
+        "kind": "video",
+        "durationSec": 31.01,
+        "title": "Morning run by the river",
+        "text": "Ten kilometres before work, cold but worth it"
+      },
+      "wordsA": [
+        "before",
+        "but",
+        "by",
+        "cold",
+        "it",
+        "kilometres",
+        "morning",
+        "river",
+        "run",
+        "ten",
+        "the",
+        "work",
+        "worth"
+      ],
+      "wordsB": [
+        "before",
+        "but",
+        "by",
+        "cold",
+        "it",
+        "kilometres",
+        "morning",
+        "river",
+        "run",
+        "ten",
+        "the",
+        "work",
+        "worth"
+      ],
+      "shared": 13,
+      "union": 13,
+      "pair": false
+    },
+    {
+      "name": "fewer than four words",
+      "a": {
+        "kind": "video",
+        "durationSec": 12,
+        "title": "Clip 1"
+      },
+      "b": {
+        "kind": "video",
+        "durationSec": 12,
+        "title": "Clip 1"
+      },
+      "wordsA": [
+        "1",
+        "clip"
+      ],
+      "wordsB": [
+        "1",
+        "clip"
+      ],
+      "shared": 2,
+      "union": 2,
+      "pair": false
+    },
+    {
+      "name": "a photo is never a look-alike",
+      "a": {
+        "kind": "image",
+        "durationSec": 5,
+        "title": "Morning run by the river",
+        "text": "Ten kilometres before work, cold but worth it"
+      },
+      "b": {
+        "kind": "video",
+        "durationSec": 5,
+        "title": "Morning run by the river",
+        "text": "Ten kilometres before work, cold but worth it"
+      },
+      "wordsA": [
+        "before",
+        "but",
+        "by",
+        "cold",
+        "it",
+        "kilometres",
+        "morning",
+        "river",
+        "run",
+        "ten",
+        "the",
+        "work",
+        "worth"
+      ],
+      "wordsB": [
+        "before",
+        "but",
+        "by",
+        "cold",
+        "it",
+        "kilometres",
+        "morning",
+        "river",
+        "run",
+        "ten",
+        "the",
+        "work",
+        "worth"
+      ],
+      "shared": 13,
+      "union": 13,
+      "pair": false
+    },
+    {
+      "name": "unknown duration",
+      "a": {
+        "kind": "video",
+        "title": "Morning run by the river",
+        "text": "Ten kilometres before work, cold but worth it"
+      },
+      "b": {
+        "kind": "video",
+        "durationSec": 40,
+        "title": "Morning run by the river",
+        "text": "Ten kilometres before work, cold but worth it"
+      },
+      "wordsA": [
+        "before",
+        "but",
+        "by",
+        "cold",
+        "it",
+        "kilometres",
+        "morning",
+        "river",
+        "run",
+        "ten",
+        "the",
+        "work",
+        "worth"
+      ],
+      "wordsB": [
+        "before",
+        "but",
+        "by",
+        "cold",
+        "it",
+        "kilometres",
+        "morning",
+        "river",
+        "run",
+        "ten",
+        "the",
+        "work",
+        "worth"
+      ],
+      "shared": 13,
+      "union": 13,
+      "pair": false
+    },
+    {
+      "name": "NFKC folds full-width letters",
+      "a": {
+        "kind": "video",
+        "durationSec": 40,
+        "title": "ＭＯＲＮＩＮＧ ＲＵＮ by the river"
+      },
+      "b": {
+        "kind": "video",
+        "durationSec": 40,
+        "title": "morning run by the river"
+      },
+      "wordsA": [
+        "by",
+        "morning",
+        "river",
+        "run",
+        "the"
+      ],
+      "wordsB": [
+        "by",
+        "morning",
+        "river",
+        "run",
+        "the"
+      ],
+      "shared": 5,
+      "union": 5,
+      "pair": true
+    },
+    {
+      "name": "words past 300 code points are ignored",
+      "a": {
+        "kind": "video",
+        "durationSec": 40,
+        "title": "Ridge walk at dawn",
+        "text": "filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler filler alpha beta gamma delta"
+      },
+      "b": {
+        "kind": "video",
+        "durationSec": 40,
+        "title": "Ridge walk at dawn",
+        "text": "alpha beta gamma delta"
+      },
+      "wordsA": [
+        "at",
+        "dawn",
+        "filler",
+        "ridge",
+        "walk"
+      ],
+      "wordsB": [
+        "alpha",
+        "at",
+        "beta",
+        "dawn",
+        "delta",
+        "gamma",
+        "ridge",
+        "walk"
+      ],
+      "shared": 4,
+      "union": 9,
+      "pair": false
+    }
+  ]
+}

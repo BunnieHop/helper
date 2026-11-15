@@ -32,6 +32,10 @@ pub struct Upload<'a> {
   pub post: Option<&'a Value>,
   pub media: &'a [PathBuf],
   pub idempotency_key: &'a str,
+  /// The same-video group this post is for (plan §1.4 item 12), beside the ledger key: the work
+  /// the slot was reserved under, else the item's current work. A destination that posts per group
+  /// (SoapBox, D-H6P3) derives its dedupe key from it.
+  pub work_id: Option<&'a str>,
   pub options: &'a Value,
 }
 
@@ -122,7 +126,29 @@ pub trait Uploader: Send + Sync {
   fn safe_to_retry(&self) -> bool {
     false
   }
+  /// The destination posts each same-video group once and needs its group id (D-H6P3, SoapBox):
+  /// an item outside a work gets a one-member work before it is reserved.
+  fn needs_group_id(&self) -> bool {
+    false
+  }
+  /// A refusal that says the group is already there, with that post's id and link (D-H6P3). The
+  /// cell becomes a skip with the link, recorded with `foundThere`.
+  fn existing_post(&self, _f: &Failure) -> Option<Published> {
+    None
+  }
+  /// Is a post saved in the ledger still there? `Some` only for destinations that can say so.
+  /// `Ok(false)` (gone, a 404) lets the cell post again in the same run; anything else keeps the
+  /// skip.
+  fn recheck<'a>(&'a self, _dest_item_id: &'a str) -> Option<BoxFut<'a, Result<bool, Failure>>> {
+    None
+  }
 }
+
+/// How long a saved-link re-check may take before the skip is kept.
+#[cfg(not(test))]
+const RECHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+#[cfg(test)]
+const RECHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// Looks up the uploader for `(platform, connectionId)`; `None` when the platform isn't wired.
 pub type Uploaders = Arc<dyn Fn(&str, &str) -> Option<Arc<dyn Uploader>> + Send + Sync>;
@@ -193,6 +219,8 @@ pub struct Hub {
   remotes: OnceLock<Remotes>,
   /// What this Helper already posted, across hops (D11).
   posted: crate::posted::Posted,
+  /// Same-video groups (O-023, O-024): which items post once between them.
+  works: crate::works::Works,
   /// Account keys for the posted ledger, set once at start-up (else the connection id).
   accounts: OnceLock<Accounts>,
   /// Items in each cloud `bunniehop.json` when it came down (keyed by the local copy's path).
@@ -269,6 +297,7 @@ impl Hub {
       exports,
       remotes: OnceLock::new(),
       posted: crate::posted::Posted::open(hops_dir.join("posted.json")),
+      works: crate::works::Works::open(hops_dir.join("works.json")),
       remote_counts: Mutex::new(HashMap::new()),
       quota_until: Mutex::new(HashMap::new()),
       accounts: OnceLock::new(),
@@ -325,10 +354,12 @@ impl Hub {
     let _ = self.accounts.set(a);
   }
 
-  /// One post's identity across hops: destination, account, source platform, source item. It is
-  /// the posted-ledger key and the idempotency key the uploader sees (Bluesky's record key comes
-  /// from it), so the same item never lands twice on one account.
-  fn post_key(&self, hop: &Hop, item: &str, dest: &str) -> String {
+  /// Same-video groups (`/v1/works`).
+  pub fn works(&self) -> &crate::works::Works {
+    &self.works
+  }
+
+  fn account(&self, hop: &Hop, dest: &str) -> String {
     let conn = hop.plan["destinations"]
       .as_array()
       .into_iter()
@@ -336,16 +367,195 @@ impl Hub {
       .find(|d| s(d, "platform") == dest)
       .map(|d| s(d, "connectionId"))
       .unwrap_or("");
-    let account = self
+    self
       .accounts
       .get()
       .and_then(|a| a(dest, conn))
-      .unwrap_or_else(|| conn.to_string());
+      .unwrap_or_else(|| conn.to_string())
+  }
+
+  /// `<source platform>|<item>`: the item as works and the ledger's `fromItem` name it.
+  fn item_ref(hop: &Hop, item: &str) -> crate::works::Ref {
     let src = match s(&hop.plan["source"], "platform") {
       "" => "source",
       p => p,
     };
-    format!("{dest}|{account}|{src}|{item}")
+    crate::works::Ref::new(src, item)
+  }
+
+  /// One item's own identity across hops: destination, account, source platform, source item (the
+  /// 0.2.0 key). It stays valid for good; grouping adds aliases, never replaces it.
+  fn post_key(&self, hop: &Hop, item: &str, dest: &str) -> String {
+    let r = Self::item_ref(hop, item);
+    crate::works::legacy_key(dest, &self.account(hop, dest), &r.platform, &r.id)
+  }
+
+  /// Every ledger key the cell answers to, from the current works (plan §1.4), with the cell's
+  /// saved key first and its one-time "Post again" flag.
+  fn want(&self, hop: &Hop, item: &str, dest: &str) -> crate::posted::Want {
+    let cell = hop
+      .cells
+      .lock()
+      .unwrap_or_else(|e| e.into_inner())
+      .get(&key(item, dest))
+      .cloned()
+      .unwrap_or(Value::Null);
+    let r = Self::item_ref(hop, item);
+    let mut w = self.works.aliases(
+      &r,
+      dest,
+      &self.account(hop, dest),
+      cell["idempotencyKey"].as_str(),
+    );
+    w.post_again = cell["postAgain"] == true;
+    w
+  }
+
+  /// The works copies in the hop's vault, read as a union before the hop (plan §1.2).
+  async fn pull_works(&self, hop: &Hop) {
+    match (&hop.remote, hop.plan.get("vault")) {
+      (Some(r), _) => {
+        let temp = self.temp_dir.join(&hop.id);
+        if let Err(f) = self.works.pull_remote(r.as_ref(), &temp).await {
+          tracing::warn!(code = f.code, "couldn't read the shared same-video lists");
+        }
+      }
+      (None, Some(_)) => {
+        self.works.pull_local(&self.vault_dir);
+      }
+      (None, None) => {}
+    }
+  }
+
+  /// This Helper's own copy, written into the hop's vault for other devices.
+  async fn push_works(&self, hop: &Hop) {
+    match (&hop.remote, hop.plan.get("vault")) {
+      (Some(r), _) => {
+        let temp = self.temp_dir.join(&hop.id);
+        if let Err(f) = self.works.push_remote(r.as_ref(), &temp).await {
+          tracing::warn!(code = f.code, "couldn't save the shared same-video list");
+        }
+      }
+      (None, Some(_)) => {
+        if let Err(e) = self.works.push_local(&self.vault_dir) {
+          tracing::warn!(error = %e, "couldn't save the shared same-video list");
+        }
+      }
+      (None, None) => {}
+    }
+  }
+
+  /// Records what this hop saw of a video (plan §1.3): its sha256 when the file may group, else
+  /// only the listing fields the look-alike note reads.
+  async fn observe_item(&self, hop: &Hop, item: &Value, media: &[PathBuf], known: Option<String>) {
+    if !matches!(s(item, "kind"), "video" | "short") {
+      return;
+    }
+    let size = media
+      .first()
+      .and_then(|p| std::fs::metadata(p).ok())
+      .map(|m| m.len());
+    let duration = item.get("durationSec").and_then(Value::as_f64);
+    let groupable = crate::works::is_groupable(s(item, "kind"), media.len(), size, duration);
+    let sha = match (groupable, known) {
+      (false, _) => None,
+      (true, Some(h)) => Some(h),
+      (true, None) => {
+        let p = media[0].clone();
+        tokio::task::spawn_blocking(move || vault::sha256_file(&p).ok().map(|(h, _)| h))
+          .await
+          .ok()
+          .flatten()
+      }
+    };
+    let text = |k: &str| {
+      item
+        .get(k)
+        .and_then(Value::as_str)
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
+    };
+    let rec = crate::works::SeenRec {
+      sha256: sha,
+      size_bytes: size.filter(|n| *n > 0),
+      duration_sec: duration.and_then(crate::works::js_number),
+      title: text("title"),
+      text: text("description").map(|t| crate::works::cut_text(&t)),
+      url: text("url"),
+      seen_at: now(),
+    };
+    if self
+      .works
+      .observe(&Self::item_ref(hop, s(item, "id")), rec, groupable)
+    {
+      self.push_works(hop).await;
+    }
+  }
+
+  /// "Not the same video" on a cell (plan §3): the item leaves its group and only that cell runs
+  /// again. Refused (`workBusy`) while the item is posting.
+  pub fn not_same(self: &Arc<Self>, id: &str, item: &str, dest: &str) -> Result<(), Failure> {
+    let h = self.hop(id)?;
+    if *h.cancel.borrow() {
+      return Err(Failure::new("stopped", "This hop was stopped."));
+    }
+    if !plan_has(&h.plan, item, dest) {
+      return Err(Failure::new(
+        "notFound404",
+        "That item isn't part of this hop.",
+      ));
+    }
+    let r = Self::item_ref(&h, item);
+    self.works.split(&r, self.posted.live_from(&r.key()))?;
+    // the cell's rerun pushes the split to the hop's vault when its drive starts again
+    self.set_cell(&h, item, dest, json!({ "state": "pending" }));
+    self.retry(id, item, dest)
+  }
+
+  /// Records items backed up before grouping existed (`Works::backfill`) from the local vault.
+  /// Reads sidecars only; it hashes nothing and takes no hop lock.
+  pub fn backfill_seen(&self) -> usize {
+    self.works.backfill(&self.vault_dir)
+  }
+
+  /// No hop is running on this Helper.
+  pub fn idle(&self) -> bool {
+    !self
+      .lock()
+      .hops
+      .values()
+      .any(|h| *h.running.lock().unwrap_or_else(|e| e.into_inner()))
+  }
+
+  #[cfg(test)]
+  pub fn posted_for_test(&self) -> &crate::posted::Posted {
+    &self.posted
+  }
+
+  /// Splits a member from Settings → Same videos (`POST /v1/works/split`).
+  pub fn split_member(&self, member: &crate::works::Ref) -> Result<(), Failure> {
+    self
+      .works
+      .split(member, self.posted.live_from(&member.key()))
+  }
+
+  /// Destinations each `seen` video already reached (finished ledger entries), for the
+  /// look-alike note.
+  pub fn posted_to(&self, r: &crate::works::Ref) -> Vec<String> {
+    let from = r.key();
+    let tail = format!("|{from}");
+    self
+      .posted
+      .entries()
+      .into_iter()
+      .filter(|(k, e)| {
+        matches!(
+          e["state"].as_str(),
+          Some("published" | "publishedUnverified")
+        ) && (e["fromItem"].as_str() == Some(from.as_str()) || k.ends_with(&tail))
+      })
+      .filter_map(|(k, _)| k.split('|').next().map(str::to_string))
+      .collect()
   }
 
   pub fn set_remotes(&self, r: Remotes) {
@@ -382,7 +592,10 @@ impl Hub {
     for e in dir.filter_map(|e| e.ok()) {
       let path = e.path();
       if path.extension().and_then(|x| x.to_str()) != Some("json")
-        || path.file_name().and_then(|n| n.to_str()) == Some("usage.json")
+        || matches!(
+          path.file_name().and_then(|n| n.to_str()),
+          Some("usage.json" | "works.json")
+        )
       {
         continue;
       }
@@ -645,18 +858,80 @@ impl Hub {
         "That item isn't part of this hop.",
       ));
     }
-    self.posted.forget(&self.post_key(&h, item, dest));
-    self.set_cell(&h, item, dest, json!({ "state": "pending" }));
+    // a one-time flag on the cell, used and cleared by the next reservation: nothing is deleted,
+    // so no other member's record or upload marker is touched (Revision 3, R2)
+    self.set_cell(
+      &h,
+      item,
+      dest,
+      json!({ "state": "pending", "postAgain": true }),
+    );
     self.retry(id, item, dest)
   }
 
-  fn mark_already_posted(&self, hop: &Hop, item: &str, dest: &str, e: Value) {
+  /// The cell shows the earlier post. When it came from another video of the item's group, the
+  /// cell names it (`sameAs`) and offers "Not the same video".
+  /// A failed, refused or stopped attempt: the keys are freed only when no attempt under them
+  /// could have reached the platform; otherwise they stay a cut-off reservation (D-144).
+  fn free_or_release(&self, slot: &crate::posted::Slot) {
+    if slot.sent {
+      self.posted.release_slot(slot);
+    } else {
+      self.posted.finish_slot(slot, None);
+    }
+  }
+
+  fn mark_already_posted(&self, hop: &Hop, item: &str, dest: &str, hit: &str, e: Value) {
     let mut st = e.clone();
     st["alreadyPosted"] = e["at"].clone();
+    let own = Self::item_ref(hop, item);
+    let from = e["fromItem"].as_str().map(str::to_string).or_else(|| {
+      let mut parts = hit.splitn(3, '|');
+      let rest = parts.nth(2)?;
+      (!rest.starts_with("work|")).then(|| rest.to_string())
+    });
+    if let Some(r) = from
+      .as_deref()
+      .and_then(crate::works::Ref::parse)
+      .filter(|r| *r != own)
+    {
+      let via = self
+        .works
+        .work_of(&own)
+        .and_then(|w| {
+          w.members
+            .iter()
+            .find(|m| m.platform == r.platform && m.id == r.id)
+            .map(|m| m.via.clone())
+        })
+        .unwrap_or_else(|| "sha256".into());
+      let mut same = json!({ "platform": r.platform, "id": r.id, "via": via });
+      if let Some(t) = self.works.seen(&r).and_then(|x| x.title) {
+        same["title"] = json!(t);
+      }
+      st["sameAs"] = same;
+    }
     if let Some(o) = st.as_object_mut() {
-      o.remove("at");
+      for f in ["at", "fromItem", "under", "foundThere"] {
+        o.remove(f);
+      }
     }
     self.set_cell(hop, item, dest, st);
+  }
+
+  /// A saved link the destination can re-check (D-H6P3): `true` only when it answered that the
+  /// post is gone. A timeout or any other answer keeps the skip.
+  async fn saved_link_gone(&self, up: &dyn Uploader, e: &Value) -> bool {
+    let Some(id) = e["destItemId"].as_str().filter(|i| !i.is_empty()) else {
+      return false;
+    };
+    let Some(check) = up.recheck(id) else {
+      return false;
+    };
+    matches!(
+      tokio::time::timeout(RECHECK_TIMEOUT, check).await,
+      Ok(Ok(false))
+    )
   }
 
   pub fn skip(&self, id: &str, item: &str, dest: &str) -> Result<(), Failure> {
@@ -693,6 +968,10 @@ impl Hub {
   }
 
   async fn drive(self: Arc<Self>, hop: Arc<Hop>) {
+    self.pull_works(&hop).await;
+    if self.works.unreadable() {
+      self.emit(json!({ "type": "issue", "hopId": hop.id, "issue": { "code": "worksUnreadable", "message": crate::works::UNREADABLE_LINE } }));
+    }
     loop {
       if self.wait_unpaused(&hop).await.is_err() {
         break;
@@ -720,6 +999,7 @@ impl Hub {
       }
     }
     *hop.running.lock().unwrap_or_else(|e| e.into_inner()) = false;
+    self.push_works(&hop).await;
     let _ = std::fs::remove_dir_all(self.temp_dir.join(&hop.id));
     if let Some(x) = hop.plan.pointer("/source/exportId").and_then(Value::as_str) {
       let in_use = self.lock().hops.values().any(|h| {
@@ -807,13 +1087,27 @@ impl Hub {
     }
   }
 
+  /// Saves a cell. Its ledger key is kept from the cell (set when the post is reserved), or the
+  /// item's own key for a cell that never reserved. A pending "Post again" flag stays on the cell
+  /// until a reservation uses it.
   fn set_cell(&self, hop: &Hop, item: &str, dest: &str, mut state: Value) {
-    state["idempotencyKey"] = json!(self.post_key(hop, item, dest));
-    hop
-      .cells
-      .lock()
-      .unwrap_or_else(|e| e.into_inner())
-      .insert(key(item, dest), state.clone());
+    {
+      let mut cells = hop.cells.lock().unwrap_or_else(|e| e.into_inner());
+      let old = cells.get(&key(item, dest));
+      if !state["idempotencyKey"].is_string() {
+        state["idempotencyKey"] = old
+          .map(|c| c["idempotencyKey"].clone())
+          .filter(Value::is_string)
+          .unwrap_or_else(|| json!(self.post_key(hop, item, dest)));
+      }
+      let waiting =
+        state["state"] == "failed" || (state["state"] == "pending" && state["inFlight"] != true);
+      if state.get("postAgain").is_none() && waiting && old.is_some_and(|c| c["postAgain"] == true)
+      {
+        state["postAgain"] = json!(true);
+      }
+      cells.insert(key(item, dest), state.clone());
+    }
     self.persist(hop);
     self.emit(json!({ "type": "destinationState", "hopId": hop.id, "itemId": item, "destination": dest, "state": state }));
   }
@@ -944,6 +1238,7 @@ impl Hub {
     }
 
     // 2. Vault: move files in, describe them, update bunniehop.json and index.csv.
+    let mut filed_sha = None;
     let media_dir = if vault_cfg && !have {
       self.stage(hop, &iid, &todo, "sidecar", None);
       let filed = match &hop.remote {
@@ -952,11 +1247,17 @@ impl Hub {
       }
       .and_then(|()| self.file_in_vault(hop, &root, item, &folder, &temp));
       let filed = match (filed, &hop.remote) {
-        (Ok(()), Some(r)) => self.push_item(r.as_ref(), &root, &folder).await,
+        (Ok(sha), Some(r)) => self
+          .push_item(r.as_ref(), &root, &folder)
+          .await
+          .map(|()| sha),
         (res, _) => res,
       };
       match filed {
-        Ok(()) => vault_item.clone(),
+        Ok(sha) => {
+          filed_sha = sha;
+          vault_item.clone()
+        }
         Err(f) => self.keep_after_vault_failure(hop, &iid, &f, &vault_item, &temp),
       }
     } else {
@@ -1003,6 +1304,11 @@ impl Hub {
       return;
     }
 
+    // Same-file grouping (plan §1.3): the file's sha256, before any destination posts.
+    if !todo.is_empty() {
+      self.observe_item(hop, item, &media, filed_sha).await;
+    }
+
     // 3. Destinations, one at a time.
     for d in &todo {
       if self.wait_unpaused(hop).await.is_err() {
@@ -1036,17 +1342,37 @@ impl Hub {
         );
         continue;
       };
-      // Already on this account from an earlier hop: nothing to send, no pacing slot used (D11).
-      let ik = self.post_key(hop, &iid, p);
-      if let Some(e) = self.posted.posted(&ik) {
-        self.mark_already_posted(hop, &iid, p, e);
-        continue;
+      if up.needs_group_id() && self.works.work_of(&Self::item_ref(hop, &iid)).is_none() {
+        self.works.own_work(&Self::item_ref(hop, &iid));
+      }
+      // Already on this account, from an earlier hop or another video of the same group: nothing
+      // to send, no pacing slot used (D11). A saved link the destination says is gone posts again.
+      let want = self.want(hop, &iid, p);
+      if !want.post_again {
+        if let Some((hit, e)) = self.posted.posted_any(&want) {
+          if self.saved_link_gone(up.as_ref(), &e).await {
+            self.set_cell(
+              hop,
+              &iid,
+              p,
+              json!({ "state": "pending", "postAgain": true }),
+            );
+          } else {
+            self.mark_already_posted(hop, &iid, p, &hit, e);
+            continue;
+          }
+        }
       }
       // Human pace (F8): the gap since this account's last post, today's cap, posting hours.
       let empty = json!({});
       let pace = Pace::from_plan(d.get("options").unwrap_or(&empty), hop.plan.get("pace"));
       let pkey = format!("{p}:{}", s(d, "connectionId"));
-      let slot = self.ledger.slot(&pkey, &pace, now_ms());
+      let t = now_ms();
+      let (from, to) = pace.day_of(t);
+      let today = self
+        .posted
+        .finished_between(&format!("{p}|{}|", self.account(hop, p)), from, to);
+      let slot = self.ledger.slot(&pkey, &pace, t, today);
       let reset = self
         .quota_until
         .lock()
@@ -1072,7 +1398,12 @@ impl Hub {
       {
         break;
       }
-      match self.posted.reserve(&ik, &now()) {
+      // Every alias checked and the slot reserved under one lock, from the works as they are now
+      // (a group may have formed during the pace wait).
+      let want = self.want(hop, &iid, p);
+      let (seen, slot) = self.posted.reserve_any(&want, &now());
+      let ik = slot.key.clone();
+      match seen {
         Seen::Clear => {}
         Seen::Busy => {
           // another hop is posting this item to this account right now: look again later
@@ -1084,33 +1415,44 @@ impl Hub {
           continue;
         }
         Seen::Posted(e) => {
-          self.mark_already_posted(hop, &iid, p, e);
+          self.mark_already_posted(hop, &iid, p, &ik, e);
+          continue;
+        }
+        Seen::Interrupted if slot.from_item != want.from_item => {
+          // another video of the group was cut off posting here; it resumes in its own hop, and
+          // this one waits for the creator rather than risk a second post
+          let st = json!({
+            "state": "publishedUnverified",
+            "issue": { "code": "publishedUnverified", "message": format!("BunnieHop stopped while posting the same video to {p} from your other copy. Check {p}; use Post again only if it isn't there.") },
+          });
+          self.set_cell(hop, &iid, p, st);
           continue;
         }
         Seen::Interrupted if up.safe_to_retry() => {
-          // the platform dedupes on the same key, so posting again finds the first post
-          self.posted.finish(&ik, None);
-          let _ = self.posted.reserve(&ik, &now());
+          // the platform dedupes on the same key, so posting again finds the first post; every
+          // key of the reservation is freed and reserved again together (R1)
+          self.posted.retry_slot(&slot, &now());
         }
         Seen::Interrupted => {
           let st = json!({
             "state": "publishedUnverified",
             "issue": { "code": "publishedUnverified", "message": format!("The Helper stopped while posting this to {p}. Check {p}; use Post again only if it isn't there.") },
           });
-          self.posted.finish(
-            &ik,
+          self.posted.finish_slot(
+            &slot,
             Some(json!({ "state": "publishedUnverified", "at": now() })),
           );
           self.set_cell(hop, &iid, p, st);
           continue;
         }
       }
-      // Saved before the upload starts, so a crash mid-post is known after a restart (D11).
+      // Saved before the upload starts, so a crash mid-post is known after a restart (D11). The
+      // cell keeps the key it was reserved under; a used "Post again" flag is dropped here.
       self.set_cell(
         hop,
         &iid,
         p,
-        json!({ "state": "pending", "inFlight": true }),
+        json!({ "state": "pending", "inFlight": true, "idempotencyKey": ik }),
       );
       self.stage(hop, &iid, &[d], "uploading", None);
       // The pace gap runs from the moment the upload starts, after the saves above, so slow
@@ -1120,12 +1462,16 @@ impl Hub {
       let post = d.pointer("/options/posts").and_then(|m| m.get(&iid));
       let control = PublishControl::new(hop.cancel.subscribe());
       let mut cancelled = hop.cancel.subscribe();
+      let work_id = crate::works::work_id_of_key(&ik)
+        .map(str::to_string)
+        .or_else(|| self.works.work_of(&Self::item_ref(hop, &iid)).map(|w| w.id));
       let publishing = up.publish_controlled(
         Upload {
           item,
           post,
           media: &media,
           idempotency_key: &ik,
+          work_id: work_id.as_deref(),
           options: d.get("options").unwrap_or(&empty),
         },
         control.clone(),
@@ -1171,17 +1517,30 @@ impl Hub {
           let mut entry = st.clone();
           entry["at"] = json!(now());
           // remembered before the cell is saved, so no later hop can post it again (D11)
-          self.posted.finish(&ik, Some(entry));
+          self.posted.finish_slot(&slot, Some(entry));
+          self.set_cell(hop, &iid, p, st);
+        }
+        Err(f) if up.existing_post(&f).is_some() => {
+          // the destination already holds this group (D-H6P3): a skip with its link
+          let pb = up.existing_post(&f).unwrap_or_else(|| unreachable!());
+          let link = pb.dest_url.clone().unwrap_or_default();
+          let mut entry = json!({ "state": "published", "destItemId": pb.dest_item_id, "foundThere": true, "at": now() });
+          let mut st = json!({ "state": "skipped", "issue": { "code": "duplicate", "message": format!("Already on {p}: {link}") } });
+          if let Some(u) = pb.dest_url {
+            entry["destUrl"] = json!(u);
+            st["destUrl"] = json!(u);
+          }
+          self.posted.finish_slot(&slot, Some(entry));
           self.set_cell(hop, &iid, p, st);
         }
         Err(f) if f.code == "stopped" => {
           self.posted.discard_upload(&ik);
-          self.posted.finish(&ik, None);
+          self.free_or_release(&slot);
           self.set_cell(hop, &iid, p, json!({"state":"skipped","issue":f.issue()}));
         }
         Err(f) if f.code == "quotaExceeded" => {
           // nothing went out; this post and the account's next ones wait for the reset
-          self.posted.finish(&ik, None);
+          self.free_or_release(&slot);
           let until = quota_reset_ms(p, now_ms());
           self
             .quota_until
@@ -1202,7 +1561,9 @@ impl Hub {
           ));
         }
         Err(f) => {
-          self.posted.finish(&ik, None);
+          // a definite refusal (D-069): this attempt posted nothing, so the work key and its twin
+          // are freed together (R1), unless an earlier attempt may have (D-144)
+          self.free_or_release(&slot);
           self.set_cell(
             hop,
             &iid,
@@ -1510,7 +1871,7 @@ impl Hub {
     item: &Value,
     folder: &Path,
     temp: &Path,
-  ) -> Result<(), Failure> {
+  ) -> Result<Option<String>, Failure> {
     let io = |e: std::io::Error| {
       let code = if e.raw_os_error() == Some(28) {
         "diskFull"
@@ -1529,7 +1890,10 @@ impl Hub {
     let mut entry = item.clone();
     entry["folder"] = json!(folder.to_string_lossy().replace('\\', "/"));
     entry["files"] = Value::Array(files);
-    entry["hashes"] = sha.map(|h| json!({ "sha256": h })).unwrap_or(json!({}));
+    entry["hashes"] = sha
+      .as_ref()
+      .map(|h| json!({ "sha256": h }))
+      .unwrap_or(json!({}));
     entry["backedUpAt"] = json!(now());
     let source_dir = root.join(source_rel(folder));
     let src = &hop.plan["source"];
@@ -1544,7 +1908,7 @@ impl Hub {
       source["url"] = json!(u);
     }
     vault::upsert(&source_dir, source, vec![entry], &now()).map_err(io)?;
-    Ok(())
+    Ok(sha.and_then(|h| h.as_str().map(str::to_string)))
   }
 
   fn persist(&self, hop: &Hop) {
@@ -1689,7 +2053,7 @@ case "$last" in
   *slow*) sleep 30 ;;
 esac
 printf 'BHP|downloading|5|10|NA|NA|NA\n'
-echo media > "$dir/media.mp4"; echo t > "$dir/thumbnail.jpg"; echo '{}' > "$dir/info.info.json"
+case "$last" in *alt*) echo media-alt > "$dir/media.mp4" ;; *) echo media > "$dir/media.mp4" ;; esac; echo t > "$dir/thumbnail.jpg"; echo '{}' > "$dir/info.info.json"
 printf 'BHP|finished|10|10|NA|NA|NA\n'
 echo "BHF|$dir/media.mp4"
 "#,
@@ -2508,6 +2872,50 @@ echo "BHF|$dir/media.mp4"
     );
   }
 
+  /// The browser's finished posts on the same account, merged into this ledger, count toward the
+  /// Helper's cap exactly as the Helper's own posts count in the browser (D-145).
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn hop_pacing_cap_counts_posts_the_browser_made_today() {
+    for (cap, browser, expect) in [(1u32, 1usize, 0usize), (2, 1, 1), (3, 1, 2)] {
+      let f = fx(false);
+      let at = now();
+      let mut b = HashMap::new();
+      for i in 0..browser {
+        b.insert(
+          format!("bluesky|bluesky-1|youtube|web{i}"),
+          json!({ "state": "published", "at": at }),
+        );
+      }
+      f.hub.posted.merge(&b);
+      let p = paced(
+        plan(
+          &[
+            ("a", "https://www.youtube.com/watch?v=a"),
+            ("b", "https://www.youtube.com/watch?v=b"),
+            ("c", "https://www.youtube.com/watch?v=c"),
+          ],
+          &["bluesky"],
+        ),
+        json!({ "minGapSec": 0, "jitterSec": [0, 0], "dailyCap": cap }),
+      );
+      f.hub.start(p).unwrap();
+      let left = ["a", "b", "c"][expect];
+      until(&f.hub, |e| {
+        e["type"] == "itemStage" && e["itemId"] == left && e["stage"] == "queued"
+      })
+      .await;
+      tokio::time::sleep(Duration::from_millis(200)).await;
+      assert_eq!(
+        f.fake.calls.lock().unwrap().len(),
+        expect,
+        "cap {cap} with {browser} browser post today"
+      );
+      f.hub.cancel("hop-1").unwrap();
+      until(&f.hub, finished).await;
+    }
+  }
+
   #[cfg(unix)]
   #[tokio::test]
   async fn hop_pacing_daily_cap_queues_the_rest_for_tomorrow() {
@@ -2732,5 +3140,928 @@ echo "BHF|$dir/media.mp4"
         "unknown"
       );
     });
+  }
+
+  // ── same-file grouping (docs/plans/2026-11-11-same-file-grouping.md §2, Revision 3) ──────────
+
+  const G1: &str = "11111111-1111-4111-8111-111111111111";
+  const G2: &str = "22222222-2222-4222-8222-222222222222";
+
+  /// A destination for grouping tests: records `(ledger key, item)` per call.
+  #[derive(Default)]
+  struct Dest {
+    calls: Mutex<Vec<(String, String)>>,
+    work_ids: Mutex<Vec<Option<String>>>,
+    safe: bool,
+    group: bool,
+    /// Refuses every post as already there (SoapBox's duplicate answer, D-H6P3).
+    dup: bool,
+    /// The saved-link re-check: `Some(Some(there))` answers, `Some(None)` never answers.
+    recheck: Option<Option<bool>>,
+    fail_first: Mutex<bool>,
+    /// The code of that first failure (`server5xx` when empty).
+    fail_code: &'static str,
+  }
+  impl Dest {
+    fn calls(&self) -> Vec<(String, String)> {
+      self.calls.lock().unwrap().clone()
+    }
+    fn items(&self) -> Vec<String> {
+      self.calls().into_iter().map(|(_, i)| i).collect()
+    }
+  }
+  impl Uploader for Dest {
+    fn publish<'a>(&'a self, u: Upload<'a>) -> BoxFut<'a, Result<Published, Failure>> {
+      Box::pin(async move {
+        let id = s(u.item, "id").to_string();
+        self
+          .calls
+          .lock()
+          .unwrap()
+          .push((u.idempotency_key.to_string(), id.clone()));
+        self
+          .work_ids
+          .lock()
+          .unwrap()
+          .push(u.work_id.map(str::to_string));
+        if self.dup {
+          return Err(Failure::new("duplicate", "That video is already there."));
+        }
+        if std::mem::replace(&mut *self.fail_first.lock().unwrap(), false) {
+          let code = if self.fail_code.is_empty() {
+            "server5xx"
+          } else {
+            self.fail_code
+          };
+          return Err(Failure::new(code, "Bluesky refused the post."));
+        }
+        Ok(Published {
+          note: None,
+          dest_item_id: format!("post-{id}"),
+          dest_url: Some(format!("https://example.test/{id}")),
+          verified: true,
+        })
+      })
+    }
+    fn safe_to_retry(&self) -> bool {
+      self.safe
+    }
+    fn needs_group_id(&self) -> bool {
+      self.group
+    }
+    fn existing_post(&self, f: &Failure) -> Option<Published> {
+      (self.dup && f.code == "duplicate").then(|| Published {
+        note: None,
+        dest_item_id: "post-there".into(),
+        dest_url: Some("https://example.test/there".into()),
+        verified: true,
+      })
+    }
+    fn recheck<'a>(&'a self, _id: &'a str) -> Option<BoxFut<'a, Result<bool, Failure>>> {
+      let answer = self.recheck?;
+      Some(Box::pin(async move {
+        match answer {
+          Some(there) => Ok(there),
+          None => std::future::pending().await,
+        }
+      }))
+    }
+  }
+
+  #[cfg(unix)]
+  fn hub_with(dir: &Path, dests: &[(&str, Arc<Dest>)]) -> Arc<Hub> {
+    fake_ytdlp(&dir.join("bin"));
+    let tools = Arc::new(Tooling::new(Binaries::new(dir.join("bin")), false));
+    let map: HashMap<String, Arc<Dest>> = dests
+      .iter()
+      .map(|(p, d)| (p.to_string(), d.clone()))
+      .collect();
+    let ups: Uploaders =
+      Arc::new(move |p: &str, _c: &str| map.get(p).map(|d| d.clone() as Arc<dyn Uploader>));
+    Hub::new(
+      dir.join("hops"),
+      dir.join("tmp"),
+      dir.join("vault"),
+      tools,
+      ups,
+    )
+  }
+
+  /// A hop from `src` with the given items; a duration makes an item's file groupable.
+  fn group_plan(id: &str, src: &str, items: &[(&str, Option<f64>)], dests: &[&str]) -> Value {
+    let urls: Vec<(String, String)> = items
+      .iter()
+      .map(|(i, _)| {
+        (
+          i.to_string(),
+          format!("https://www.youtube.com/watch?v={i}"),
+        )
+      })
+      .collect();
+    let refs: Vec<(&str, &str)> = urls.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    let mut p = plan(&refs, dests);
+    p["id"] = json!(id);
+    p["source"]["platform"] = json!(src);
+    for (n, (_, d)) in items.iter().enumerate() {
+      p["items"][n]["platform"] = json!(src);
+      if let Some(d) = d {
+        p["items"][n]["durationSec"] = json!(d);
+      }
+    }
+    p
+  }
+
+  fn wref(src: &str, id: &str) -> crate::works::Ref {
+    crate::works::Ref::new(src, id)
+  }
+
+  /// `hops/works.json` with fixed work ids: each group's first member paired with the rest.
+  fn works_file(dir: &Path, groups: &[(&str, &[(&str, &str)])]) {
+    let mut d = crate::works::WorksDoc::empty(
+      "00000000-0000-4000-8000-000000000001",
+      "2026-11-01T00:00:00Z",
+    );
+    for (n, (wid, members)) in groups.iter().enumerate() {
+      let at = format!("2026-11-0{}T00:00:00Z", n + 1);
+      for m in &members[1..] {
+        d = crate::works::same_video(
+          &d,
+          &wref(members[0].0, members[0].1),
+          &wref(m.0, m.1),
+          &at,
+          wid,
+        );
+      }
+    }
+    std::fs::create_dir_all(dir.join("hops")).unwrap();
+    std::fs::write(dir.join("hops/works.json"), d.serialize()).unwrap();
+  }
+
+  fn ledger_file(dir: &Path, entries: Value) {
+    std::fs::create_dir_all(dir.join("hops")).unwrap();
+    std::fs::write(dir.join("hops/posted.json"), entries.to_string()).unwrap();
+  }
+
+  fn cells_of(dir: &Path, hop: &str) -> Value {
+    let doc: Value =
+      serde_json::from_str(&std::fs::read_to_string(dir.join(format!("hops/{hop}.json"))).unwrap())
+        .unwrap();
+    doc["cells"].clone()
+  }
+
+  fn hop_done(id: &'static str) -> impl Fn(&Value) -> bool {
+    move |e| e["type"] == "hopFinished" && e["hopId"] == id
+  }
+
+  async fn calls_reach(d: &Dest, n: usize) {
+    for _ in 0..200 {
+      if d.calls().len() >= n {
+        return;
+      }
+      tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("calls: {:?}", d.calls());
+  }
+
+  fn work_key(dest: &str, wid: &str) -> String {
+    format!("{dest}|{dest}-1|work|{wid}")
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn helper_0_2_0_ledger_never_reposts_after_grouping() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/ledger-0.2.0");
+    let expected: Value =
+      serde_json::from_str(&std::fs::read_to_string(fixture.join("expected.json")).unwrap())
+        .unwrap();
+    assert_eq!(
+      expected["helperVersion"], "0.2.0",
+      "written by Helper 0.2.0"
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let hops = dir.path().join("hops");
+    std::fs::create_dir_all(hops.join("upload-handles")).unwrap();
+    std::fs::copy(fixture.join("hops/posted.json"), hops.join("posted.json")).unwrap();
+    for e in std::fs::read_dir(fixture.join("hops/upload-handles")).unwrap() {
+      let e = e.unwrap();
+      std::fs::copy(e.path(), hops.join("upload-handles").join(e.file_name())).unwrap();
+    }
+    let marker = hops
+      .join("upload-handles")
+      .join(expected["aFacebookMarkerFile"].as_str().unwrap());
+    let marker_before = std::fs::read(&marker).unwrap();
+    works_file(
+      dir.path(),
+      &[
+        (G1, &[("youtube", "a"), ("youtube", "b")]),
+        (G2, &[("youtube", "c"), ("youtube", "d")]),
+      ],
+    );
+    let bsky = Arc::new(Dest {
+      safe: true,
+      ..Default::default()
+    });
+    let fb = Arc::new(Dest::default());
+    let hub = hub_with(
+      dir.path(),
+      &[("bluesky", bsky.clone()), ("facebook", fb.clone())],
+    );
+    let c_date = expected["cOriginalDate"].as_str().unwrap();
+    let mut p = group_plan(
+      "hop-g",
+      "youtube",
+      &[("a", None), ("b", None), ("c", None), ("d", None)],
+      &["bluesky", "facebook"],
+    );
+    p["items"][2]["publishedAt"] = json!(c_date);
+    hub.start(p).unwrap();
+    until(&hub, finished).await;
+
+    // Bluesky: only c's cut-off post, under its 0.2.0 key, so its record key is the one 0.2.0 made
+    let c_key = expected["keys"]["cBluesky"].as_str().unwrap();
+    assert_eq!(bsky.calls(), [(c_key.to_string(), "c".to_string())]);
+    assert_eq!(
+      crate::uploaders::bluesky::tid_for(Some(c_date), c_key, 0),
+      expected["cBlueskyRecordKey"].as_str().unwrap()
+    );
+    let cells = cells_of(dir.path(), "hop-g");
+    for i in ["a", "b", "d"] {
+      assert!(
+        cells[format!("{i} → bluesky")]["alreadyPosted"].is_string(),
+        "{i} skipped on Bluesky: {cells}"
+      );
+    }
+    assert_eq!(cells["b → bluesky"]["sameAs"]["id"], "a");
+    // Facebook: a's cut-off upload waits for the creator, its marker untouched; b never posts
+    assert_eq!(cells["a → facebook"]["state"], "publishedUnverified");
+    assert_eq!(cells["b → facebook"]["state"], "publishedUnverified");
+    assert_eq!(std::fs::read(&marker).unwrap(), marker_before);
+    assert_eq!(
+      fb.items(),
+      ["c"],
+      "only c reaches Facebook, once for c and d"
+    );
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn works_split_ignores_the_leaving_members_posts_after_a_ledger_merge() {
+    let dir = tempfile::tempdir().unwrap();
+    works_file(dir.path(), &[(G1, &[("youtube", "a"), ("youtube", "b")])]);
+    let d = Arc::new(Dest::default());
+    let hub = hub_with(dir.path(), &[("bluesky", d.clone())]);
+    hub
+      .start(group_plan("hop-1", "youtube", &[("b", None)], &["bluesky"]))
+      .unwrap();
+    until(&hub, hop_done("hop-1")).await;
+    let before = hub.ledger();
+    assert_eq!(before[&work_key("bluesky", G1)]["fromItem"], "youtube|b");
+    hub.split_member(&wref("youtube", "b")).unwrap();
+    // another engine's copy from before the split comes back
+    hub.merge_ledger(&before);
+    hub
+      .start(group_plan(
+        "hop-2",
+        "youtube",
+        &[("a", None), ("b", None)],
+        &["bluesky"],
+      ))
+      .unwrap();
+    until(&hub, hop_done("hop-2")).await;
+    assert_eq!(d.items(), ["b", "a"], "a posts once b has left its group");
+    let cells = cells_of(dir.path(), "hop-2");
+    assert!(cells["b → bluesky"]["alreadyPosted"].is_string());
+    assert!(cells["a → bluesky"]["alreadyPosted"].is_null());
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn works_split_the_member_left_never_sends_the_leavers_key() {
+    let dir = tempfile::tempdir().unwrap();
+    works_file(dir.path(), &[(G1, &[("youtube", "a"), ("youtube", "b")])]);
+    let d = Arc::new(Dest::default());
+    let hub = hub_with(dir.path(), &[("bluesky", d.clone())]);
+    hub
+      .start(group_plan("hop-1", "youtube", &[("a", None)], &["bluesky"]))
+      .unwrap();
+    until(&hub, hop_done("hop-1")).await;
+    hub.split_member(&wref("youtube", "a")).unwrap();
+    hub
+      .start(group_plan("hop-2", "youtube", &[("b", None)], &["bluesky"]))
+      .unwrap();
+    until(&hub, hop_done("hop-2")).await;
+    let calls = d.calls();
+    assert_eq!(d.items(), ["a", "b"], "b posts once, after a left");
+    // Bluesky's record key and Mastodon's Idempotency-Key come from this key: never a's
+    assert_eq!(calls[0].0, work_key("bluesky", G1));
+    assert_eq!(calls[1].0, "bluesky|bluesky-1|youtube|b");
+    let l = hub.ledger();
+    assert_eq!(l[&work_key("bluesky", G1)]["fromItem"], "youtube|a");
+    assert_eq!(l["bluesky|bluesky-1|youtube|b"]["state"], "published");
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn works_merge_keeps_both_groups_posts() {
+    let dir = tempfile::tempdir().unwrap();
+    works_file(
+      dir.path(),
+      &[
+        (G1, &[("youtube", "a"), ("youtube", "b")]),
+        (G2, &[("youtube", "c"), ("youtube", "d")]),
+      ],
+    );
+    let d = Arc::new(Dest::default());
+    let hub = hub_with(dir.path(), &[("bluesky", d.clone())]);
+    hub
+      .start(group_plan(
+        "hop-1",
+        "youtube",
+        &[("a", None), ("c", None)],
+        &["bluesky"],
+      ))
+      .unwrap();
+    until(&hub, hop_done("hop-1")).await;
+    // the creator says the two groups are one video
+    hub
+      .works()
+      .same(&wref("youtube", "a"), &wref("youtube", "c"));
+    assert_eq!(hub.works().doc().works.len(), 1);
+    hub
+      .start(group_plan(
+        "hop-2",
+        "youtube",
+        &[("b", None), ("d", None)],
+        &["bluesky"],
+      ))
+      .unwrap();
+    until(&hub, hop_done("hop-2")).await;
+    assert_eq!(d.items(), ["a", "c"], "nothing posts after the merge");
+    let cells = cells_of(dir.path(), "hop-2");
+    assert!(cells["b → bluesky"]["alreadyPosted"].is_string());
+    assert!(cells["d → bluesky"]["alreadyPosted"].is_string());
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn works_change_mid_hop_resumes_the_saved_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let own = "bluesky|bluesky-1|youtube|a";
+    // cut off mid-post before a group formed
+    ledger_file(
+      dir.path(),
+      json!({ own: { "state": "reserved", "at": "2026-11-10T10:00:00Z" } }),
+    );
+    let p = group_plan(
+      "hop-m",
+      "youtube",
+      &[("a", None), ("b", None)],
+      &["bluesky"],
+    );
+    let doc = json!({
+      "plan": p,
+      "status": "running",
+      "cells": { "a → bluesky": { "state": "pending", "inFlight": true, "idempotencyKey": own } },
+    });
+    std::fs::write(dir.path().join("hops/hop-m.json"), doc.to_string()).unwrap();
+    works_file(dir.path(), &[(G1, &[("youtube", "a"), ("youtube", "b")])]);
+    let d = Arc::new(Dest {
+      safe: true,
+      ..Default::default()
+    });
+    let hub = hub_with(dir.path(), &[("bluesky", d.clone())]);
+    assert_eq!(hub.restore(), ["hop-m"]);
+    until(&hub, finished).await;
+    assert_eq!(d.calls(), [(own.to_string(), "a".to_string())]);
+    let cells = cells_of(dir.path(), "hop-m");
+    assert_eq!(cells["a → bluesky"]["idempotencyKey"], own);
+    assert!(cells["b → bluesky"]["alreadyPosted"].is_string());
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn grouping_during_a_pace_wait_never_posts_twice() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = Arc::new(Dest::default());
+    let hub = hub_with(dir.path(), &[("bluesky", d.clone())]);
+    let p = paced(
+      group_plan(
+        "hop-1",
+        "youtube",
+        &[("a", None), ("b", None)],
+        &["bluesky"],
+      ),
+      json!({ "minGapSec": 2, "jitterSec": [0, 0] }),
+    );
+    hub.start(p).unwrap();
+    calls_reach(&d, 1).await;
+    // b is waiting out the gap; the creator groups the two now
+    hub
+      .works()
+      .same(&wref("youtube", "a"), &wref("youtube", "b"));
+    until(&hub, finished).await;
+    assert_eq!(d.items(), ["a"]);
+    let cells = cells_of(dir.path(), "hop-1");
+    assert!(cells["b → bluesky"]["alreadyPosted"].is_string());
+    assert_eq!(cells["b → bluesky"]["sameAs"]["id"], "a");
+    assert_eq!(cells["b → bluesky"]["sameAs"]["via"], "creator");
+  }
+
+  /// A reservation under G1 from member `a` and its twin, cut off by a crash.
+  fn crashed_under_g1(dir: &Path) {
+    let g = work_key("bluesky", G1);
+    ledger_file(
+      dir,
+      json!({
+        g.clone(): { "state": "reserved", "at": "2026-11-10T10:00:00Z", "fromItem": "youtube|a" },
+        "bluesky|bluesky-1|youtube|a": { "state": "reserved", "at": "2026-11-10T10:00:00Z", "fromItem": "youtube|a", "under": g },
+      }),
+    );
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn split_after_a_crash_still_finds_the_leaving_members_reservation() {
+    let dir = tempfile::tempdir().unwrap();
+    works_file(dir.path(), &[(G1, &[("youtube", "a"), ("youtube", "b")])]);
+    crashed_under_g1(dir.path());
+    let d = Arc::new(Dest::default());
+    let hub = hub_with(dir.path(), &[("bluesky", d.clone())]);
+    hub.split_member(&wref("youtube", "a")).unwrap();
+    hub
+      .start(group_plan(
+        "hop-1",
+        "youtube",
+        &[("a", None), ("b", None)],
+        &["bluesky"],
+      ))
+      .unwrap();
+    until(&hub, finished).await;
+    let cells = cells_of(dir.path(), "hop-1");
+    assert_eq!(cells["a → bluesky"]["state"], "publishedUnverified");
+    assert_eq!(d.items(), ["b"], "a is never sent; b, now apart, posts");
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn a_split_member_resumes_under_its_twin_and_keeps_the_work_key_as_its_record() {
+    let dir = tempfile::tempdir().unwrap();
+    works_file(dir.path(), &[(G1, &[("youtube", "a"), ("youtube", "b")])]);
+    crashed_under_g1(dir.path());
+    let d = Arc::new(Dest {
+      safe: true,
+      ..Default::default()
+    });
+    let hub = hub_with(dir.path(), &[("bluesky", d.clone())]);
+    hub.split_member(&wref("youtube", "a")).unwrap();
+    hub
+      .start(group_plan("hop-1", "youtube", &[("a", None)], &["bluesky"]))
+      .unwrap();
+    until(&hub, finished).await;
+    let g = work_key("bluesky", G1);
+    // the retry sends the key of the first attempt, so the platform finds that post
+    assert_eq!(d.calls(), [(g.clone(), "a".to_string())]);
+    let ledger = hub.ledger();
+    // the key went to the platform, so it stays a's record: inert for b, never sent again (D-143)
+    assert_eq!(ledger[&g]["state"], "published");
+    assert_eq!(ledger[&g]["fromItem"], "youtube|a");
+    let twin = &ledger["bluesky|bluesky-1|youtube|a"];
+    assert_eq!(twin["state"], "published");
+    assert_eq!(twin["fromItem"], "youtube|a");
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn a_cut_off_member_split_and_retried_never_lends_its_key_to_the_member_left() {
+    let dir = tempfile::tempdir().unwrap();
+    works_file(dir.path(), &[(G1, &[("youtube", "a"), ("youtube", "b")])]);
+    crashed_under_g1(dir.path());
+    let d = Arc::new(Dest {
+      safe: true,
+      ..Default::default()
+    });
+    let hub = hub_with(dir.path(), &[("bluesky", d.clone())]);
+    hub.split_member(&wref("youtube", "a")).unwrap();
+    hub
+      .start(group_plan("hop-1", "youtube", &[("a", None)], &["bluesky"]))
+      .unwrap();
+    until(&hub, hop_done("hop-1")).await;
+    hub
+      .start(group_plan("hop-2", "youtube", &[("b", None)], &["bluesky"]))
+      .unwrap();
+    until(&hub, hop_done("hop-2")).await;
+    let g = work_key("bluesky", G1);
+    // a platform that dedupes on the key would hand b a's post if b sent g
+    assert_eq!(
+      d.calls(),
+      [
+        (g, "a".to_string()),
+        ("bluesky|bluesky-1|youtube|b".to_string(), "b".to_string())
+      ]
+    );
+    assert_eq!(
+      cells_of(dir.path(), "hop-2")["b → bluesky"]["state"],
+      "published"
+    );
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn a_failed_retry_of_a_cut_off_post_keeps_its_keys() {
+    for code in ["tokenExpired", "server5xx"] {
+      let dir = tempfile::tempdir().unwrap();
+      works_file(dir.path(), &[(G1, &[("youtube", "a"), ("youtube", "b")])]);
+      crashed_under_g1(dir.path());
+      let d = Arc::new(Dest {
+        safe: true,
+        fail_first: Mutex::new(true),
+        fail_code: code,
+        ..Default::default()
+      });
+      let hub = hub_with(dir.path(), &[("bluesky", d.clone())]);
+      hub.split_member(&wref("youtube", "a")).unwrap();
+      hub
+        .start(group_plan("hop-1", "youtube", &[("a", None)], &["bluesky"]))
+        .unwrap();
+      until(&hub, hop_done("hop-1")).await;
+      let g = work_key("bluesky", G1);
+      let own_a = "bluesky|bluesky-1|youtube|a";
+      // the first attempt may be on the platform: the failed retry frees nothing
+      let l = hub.ledger();
+      assert_eq!(l[&g]["fromItem"], "youtube|a", "{code}");
+      assert_eq!(l[own_a]["under"], g.as_str(), "{code}");
+      hub
+        .start(group_plan("hop-2", "youtube", &[("b", None)], &["bluesky"]))
+        .unwrap();
+      until(&hub, hop_done("hop-2")).await;
+      hub
+        .start(group_plan("hop-3", "youtube", &[("a", None)], &["bluesky"]))
+        .unwrap();
+      until(&hub, hop_done("hop-3")).await;
+      // b never sends a's key; a never posts under a second key, it retries the first
+      assert_eq!(
+        d.calls(),
+        [
+          (g.clone(), "a".to_string()),
+          ("bluesky|bluesky-1|youtube|b".to_string(), "b".to_string()),
+          (g.clone(), "a".to_string()),
+        ],
+        "{code}"
+      );
+      let l = hub.ledger();
+      assert_eq!(l[&g]["state"], "published", "{code}");
+      assert_eq!(l[own_a]["state"], "published", "{code}");
+    }
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn a_refused_post_frees_the_work_key_and_its_twin() {
+    let dir = tempfile::tempdir().unwrap();
+    works_file(dir.path(), &[(G1, &[("youtube", "a"), ("youtube", "b")])]);
+    let d = Arc::new(Dest {
+      fail_first: Mutex::new(true),
+      ..Default::default()
+    });
+    let hub = hub_with(dir.path(), &[("bluesky", d.clone())]);
+    hub
+      .start(group_plan("hop-1", "youtube", &[("a", None)], &["bluesky"]))
+      .unwrap();
+    until(&hub, finished).await;
+    let g = work_key("bluesky", G1);
+    let own = "bluesky|bluesky-1|youtube|a";
+    assert_eq!(d.calls(), [(g.clone(), "a".to_string())]);
+    let ledger = hub.ledger();
+    assert!(
+      !ledger.contains_key(&g) && !ledger.contains_key(own),
+      "{ledger:?}"
+    );
+    hub.retry("hop-1", "a", "bluesky").unwrap();
+    calls_reach(&d, 2).await;
+    until(&hub, |_| {
+      hub
+        .ledger()
+        .get(own)
+        .is_some_and(|e| e["state"] == "published")
+    })
+    .await;
+    let ledger = hub.ledger();
+    assert_eq!(ledger[&g]["state"], "published");
+    assert_eq!(ledger[own]["under"], g.as_str());
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn post_again_on_one_member_never_deletes_another_members_record() {
+    let dir = tempfile::tempdir().unwrap();
+    let b_key = "bluesky|bluesky-1|youtube|b";
+    let b_entry = json!({ "state": "published", "destItemId": "post-b", "destUrl": "https://example.test/b", "at": "2026-11-01T10:00:00Z" });
+    ledger_file(dir.path(), json!({ b_key: b_entry }));
+    let handles = crate::posted::UploadHandles::new(dir.path().join("hops/upload-handles"));
+    assert!(handles.begin(b_key, "video").unwrap());
+    works_file(dir.path(), &[(G1, &[("youtube", "a"), ("youtube", "b")])]);
+    let d = Arc::new(Dest::default());
+    let hub = hub_with(dir.path(), &[("bluesky", d.clone())]);
+    hub
+      .start(group_plan("hop-1", "youtube", &[("a", None)], &["bluesky"]))
+      .unwrap();
+    until(&hub, finished).await;
+    assert!(d.calls().is_empty(), "b's post covers a");
+    hub.post_again("hop-1", "a", "bluesky").unwrap();
+    calls_reach(&d, 1).await;
+    until(&hub, |_| {
+      hub
+        .ledger()
+        .get("bluesky|bluesky-1|youtube|a")
+        .is_some_and(|e| e["state"] == "published")
+    })
+    .await;
+    assert_eq!(d.calls(), [(work_key("bluesky", G1), "a".to_string())]);
+    assert_eq!(hub.ledger()[b_key], b_entry, "b's record is untouched");
+    assert!(
+      handles.load(b_key).unwrap().is_some(),
+      "b's upload marker is untouched"
+    );
+    // the flag was used once
+    for _ in 0..200 {
+      if cells_of(dir.path(), "hop-1")["a → bluesky"]["state"] == "published" {
+        break;
+      }
+      tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(cells_of(dir.path(), "hop-1")["a → bluesky"]["postAgain"].is_null());
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn identical_file_from_two_sources_posts_once_per_destination() {
+    let dir = tempfile::tempdir().unwrap();
+    let bsky = Arc::new(Dest::default());
+    let masto = Arc::new(Dest::default());
+    let hub = hub_with(
+      dir.path(),
+      &[("bluesky", bsky.clone()), ("mastodon", masto.clone())],
+    );
+    hub
+      .start(group_plan(
+        "hop-1",
+        "youtube",
+        &[("a", Some(30.0))],
+        &["bluesky", "mastodon"],
+      ))
+      .unwrap();
+    until(&hub, hop_done("hop-1")).await;
+    // the same file, saved again from TikTok
+    hub
+      .start(group_plan(
+        "hop-2",
+        "tiktok",
+        &[("b", Some(30.0))],
+        &["bluesky", "mastodon"],
+      ))
+      .unwrap();
+    until(&hub, hop_done("hop-2")).await;
+    assert_eq!(bsky.items(), ["a"]);
+    assert_eq!(masto.items(), ["a"]);
+    let works = hub.works().doc().works;
+    assert_eq!(works.len(), 1);
+    assert_eq!(works[0].members.len(), 2);
+    let cells = cells_of(dir.path(), "hop-2");
+    for dest in ["bluesky", "mastodon"] {
+      let c = &cells[format!("b → {dest}")];
+      assert!(c["alreadyPosted"].is_string(), "{c}");
+      assert_eq!(c["sameAs"]["platform"], "youtube");
+      assert_eq!(c["sameAs"]["id"], "a");
+      assert_eq!(c["sameAs"]["via"], "sha256");
+      assert_eq!(c["destUrl"], "https://example.test/a");
+    }
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn upload_carries_the_work_id_beside_the_ledger_key() {
+    let dir = tempfile::tempdir().unwrap();
+    works_file(dir.path(), &[(G1, &[("youtube", "a"), ("youtube", "b")])]);
+    let d = Arc::new(Dest::default());
+    let hub = hub_with(dir.path(), &[("bluesky", d.clone())]);
+    hub
+      .start(group_plan(
+        "hop-1",
+        "youtube",
+        &[("a", None), ("c", None)],
+        &["bluesky"],
+      ))
+      .unwrap();
+    until(&hub, finished).await;
+    assert_eq!(
+      d.calls(),
+      [
+        (work_key("bluesky", G1), "a".to_string()),
+        ("bluesky|bluesky-1|youtube|c".to_string(), "c".to_string())
+      ]
+    );
+    assert_eq!(
+      *d.work_ids.lock().unwrap(),
+      [Some(G1.to_string()), None],
+      "a grouped item names its work; an item in none names nothing"
+    );
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn grouping_never_changes_the_mastodon_idempotency_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let own = "mastodon|mastodon-1|youtube|a";
+    // a Helper 0.2.0 reservation, cut off before grouping existed
+    ledger_file(
+      dir.path(),
+      json!({ own: { "state": "reserved", "at": "2026-10-01T10:00:00Z" } }),
+    );
+    works_file(dir.path(), &[(G1, &[("youtube", "a"), ("tiktok", "b")])]);
+    let masto = Arc::new(Dest {
+      safe: true,
+      ..Default::default()
+    });
+    let hub = hub_with(dir.path(), &[("mastodon", masto.clone())]);
+    hub
+      .start(group_plan(
+        "hop-1",
+        "youtube",
+        &[("a", None)],
+        &["mastodon"],
+      ))
+      .unwrap();
+    until(&hub, finished).await;
+    assert_eq!(masto.calls(), [(own.to_string(), "a".to_string())]);
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn duplicate_refusal_is_a_skip_with_the_link_under_the_work_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let sb = Arc::new(Dest {
+      dup: true,
+      group: true,
+      ..Default::default()
+    });
+    let hub = hub_with(dir.path(), &[("soapbox", sb.clone())]);
+    hub
+      .start(group_plan("hop-1", "youtube", &[("a", None)], &["soapbox"]))
+      .unwrap();
+    until(&hub, finished).await;
+    // a destination that posts per group gives the item a one-member work first
+    let wid = hub
+      .works()
+      .work_of(&wref("youtube", "a"))
+      .expect("a one-member work")
+      .id;
+    let g = work_key("soapbox", &wid);
+    assert_eq!(sb.calls(), [(g.clone(), "a".to_string())]);
+    let cell = &cells_of(dir.path(), "hop-1")["a → soapbox"];
+    assert_eq!(cell["state"], "skipped");
+    assert_eq!(cell["issue"]["code"], "duplicate");
+    assert_eq!(
+      cell["issue"]["message"],
+      "Already on soapbox: https://example.test/there"
+    );
+    assert_eq!(cell["destUrl"], "https://example.test/there");
+    let e = &hub.ledger()[&g];
+    assert_eq!(e["state"], "published");
+    assert_eq!(e["foundThere"], true);
+    assert_eq!(e["destItemId"], "post-there");
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn unreadable_works_copy_reports_works_unreadable_once() {
+    // the app shows the line only for the code `worksUnreadable` (packages/protocol errors.ts)
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("hops")).unwrap();
+    std::fs::write(dir.path().join("hops/works.json"), "{ not json").unwrap();
+    let d = Arc::new(Dest::default());
+    let hub = hub_with(dir.path(), &[("bluesky", d.clone())]);
+    hub
+      .start(group_plan("hop-1", "youtube", &[("a", None)], &["bluesky"]))
+      .unwrap();
+    let evs = until(&hub, finished).await;
+    let issues: Vec<&Value> = evs.iter().filter(|e| e["type"] == "issue").collect();
+    assert_eq!(issues.len(), 1, "{issues:?}");
+    assert_eq!(issues[0]["issue"]["code"], "worksUnreadable");
+    assert_eq!(issues[0]["issue"]["message"], crate::works::UNREADABLE_LINE);
+  }
+
+  fn saved_post(dir: &Path) {
+    ledger_file(
+      dir,
+      json!({ "soapbox|soapbox-1|youtube|a": { "state": "published", "destItemId": "post-old", "destUrl": "https://example.test/old", "at": "2026-11-01T10:00:00Z" } }),
+    );
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn saved_link_gone_404_clears_the_skip() {
+    let dir = tempfile::tempdir().unwrap();
+    saved_post(dir.path());
+    let sb = Arc::new(Dest {
+      recheck: Some(Some(false)),
+      ..Default::default()
+    });
+    let hub = hub_with(dir.path(), &[("soapbox", sb.clone())]);
+    hub
+      .start(group_plan("hop-1", "youtube", &[("a", None)], &["soapbox"]))
+      .unwrap();
+    until(&hub, finished).await;
+    assert_eq!(sb.items(), ["a"], "the post was gone, so it posts again");
+    let cell = &cells_of(dir.path(), "hop-1")["a → soapbox"];
+    assert_eq!(cell["state"], "published");
+    assert!(cell["alreadyPosted"].is_null());
+    assert!(cell["postAgain"].is_null());
+    assert_eq!(cell["destUrl"], "https://example.test/a");
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn saved_link_recheck_timeout_keeps_the_skip() {
+    let dir = tempfile::tempdir().unwrap();
+    saved_post(dir.path());
+    let sb = Arc::new(Dest {
+      recheck: Some(None),
+      ..Default::default()
+    });
+    let hub = hub_with(dir.path(), &[("soapbox", sb.clone())]);
+    hub
+      .start(group_plan("hop-1", "youtube", &[("a", None)], &["soapbox"]))
+      .unwrap();
+    until(&hub, finished).await;
+    assert!(sb.calls().is_empty());
+    let cell = &cells_of(dir.path(), "hop-1")["a → soapbox"];
+    assert!(cell["alreadyPosted"].is_string());
+    assert_eq!(cell["destUrl"], "https://example.test/old");
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn lookalike_never_changes_what_posts() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = Arc::new(Dest::default());
+    let hub = hub_with(dir.path(), &[("bluesky", d.clone())]);
+    let mut p = group_plan(
+      "hop-1",
+      "youtube",
+      &[("a", Some(30.0)), ("b-alt", Some(30.5))],
+      &["bluesky"],
+    );
+    for n in 0..2 {
+      p["items"][n]["title"] = json!("Sunset over the harbor tonight");
+      p["items"][n]["description"] = json!("Filmed from the pier with the new lens");
+    }
+    let listed = p["items"][1].clone();
+    hub.start(p).unwrap();
+    until(&hub, finished).await;
+    assert_eq!(d.items(), ["a", "b-alt"], "different files both post");
+    let doc = hub.works().doc();
+    assert!(doc.works.is_empty(), "a look-alike never groups by itself");
+    assert_eq!(
+      crate::works::find_lookalikes(&doc, &[listed], |r| hub.posted_to(r)).len(),
+      1,
+      "the pair is still offered as a look-alike"
+    );
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn sha256_backfill_never_blocks_a_hop() {
+    let dir = tempfile::tempdir().unwrap();
+    let probe = dir.path().join("probe");
+    std::fs::write(&probe, "media\n").unwrap();
+    let (sha, size) = vault::sha256_file(&probe).unwrap();
+    let items: Vec<Value> = (0..60)
+      .map(|n| json!({ "id": format!("old{n}"), "platform": "youtube", "kind": "video", "title": format!("Old {n}"), "durationSec": 30, "files": [{ "role": "media", "path": "media.mp4", "sizeBytes": size, "sha256": if n == 0 { sha.clone() } else { format!("{n:064x}") } }], "backedUpAt": "2026-01-01T00:00:00Z" }))
+      .collect();
+    let side = dir.path().join("vault/youtube/old");
+    std::fs::create_dir_all(&side).unwrap();
+    std::fs::write(
+      side.join("bunniehop.json"),
+      json!({ "format": "bunniehop.sidecar", "version": 1, "source": { "platform": "youtube", "handle": "old" }, "items": items }).to_string(),
+    )
+    .unwrap();
+    let d = Arc::new(Dest::default());
+    let hub = hub_with(dir.path(), &[("bluesky", d.clone())]);
+    let h2 = hub.clone();
+    let back = tokio::task::spawn_blocking(move || h2.backfill_seen());
+    hub
+      .start(group_plan(
+        "hop-1",
+        "youtube",
+        &[("a", Some(30.0))],
+        &["bluesky"],
+      ))
+      .unwrap();
+    until(&hub, finished).await;
+    assert_eq!(back.await.unwrap(), 60);
+    assert_eq!(d.items(), ["a"], "the hop posts; old0 was never posted");
+    let w = hub.works().work_of(&wref("youtube", "a")).expect("grouped");
+    assert!(w.members.iter().any(|m| m.id == "old0"));
+    assert!(hub.works().seen(&wref("youtube", "old59")).is_some());
   }
 }

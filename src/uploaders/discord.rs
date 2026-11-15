@@ -246,6 +246,7 @@ mod tests {
         post: None,
         media: &[],
         idempotency_key: "h:v1:discord",
+        work_id: None,
         options: &json!({}),
       })
       .await

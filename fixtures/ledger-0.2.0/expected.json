@@ -1,0 +1,12 @@
+{
+  "aBlueskyRecordKey": "3jlobduk6mqbt",
+  "aFacebookMarkerFile": "349146eae306ad23f571bd1c7e7c3a37ad437cd12a9e66ec5a7409850628a975.json",
+  "cBlueskyRecordKey": "3kmxoaov622hn",
+  "cOriginalDate": "2024-03-05T17:20:00Z",
+  "helperVersion": "0.2.0",
+  "keys": {
+    "aBluesky": "bluesky|bluesky-1|youtube|a",
+    "aFacebook": "facebook|facebook-1|youtube|a",
+    "cBluesky": "bluesky|bluesky-1|youtube|c"
+  }
+}

@@ -1550,6 +1550,7 @@ pub(crate) mod flow_tests {
           post: None,
           media: &files,
           idempotency_key: "key",
+          work_id: None,
           options: &Value::Null,
         })
         .await
@@ -1586,6 +1587,7 @@ pub(crate) mod flow_tests {
           post: None,
           media: &files,
           idempotency_key: "key",
+          work_id: None,
           options: &Value::Null,
         })
         .await;
@@ -1600,6 +1602,7 @@ pub(crate) mod flow_tests {
             post: None,
             media: &files,
             idempotency_key: "key",
+            work_id: None,
             options: &Value::Null,
           })
           .await
@@ -1622,6 +1625,7 @@ pub(crate) mod flow_tests {
               post: None,
               media: &files,
               idempotency_key: "key",
+              work_id: None,
               options: &Value::Null
             })
             .await
@@ -1658,6 +1662,7 @@ pub(crate) mod flow_tests {
           post: None,
           media: &files,
           idempotency_key: "key",
+          work_id: None,
           options: &Value::Null,
         },
         PublishControl::new(rx),
@@ -1720,6 +1725,7 @@ pub(crate) mod flow_tests {
           post: None,
           media: &files,
           idempotency_key: "key",
+          work_id: None,
           options: &Value::Null,
         })
         .await
@@ -1757,6 +1763,7 @@ pub(crate) mod flow_tests {
           post: None,
           media: &files,
           idempotency_key: "key",
+          work_id: None,
           options: &Value::Null
         })
         .await

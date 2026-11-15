@@ -818,6 +818,7 @@ mod tests {
       post: Some(&post),
       media: &media,
       idempotency_key: "tt|1|src|1",
+      work_id: None,
       options,
     };
     match control {
@@ -1082,6 +1083,28 @@ mod tests {
     assert_eq!(label, "@artist");
     assert_eq!(secret["openId"], "open-1");
     assert_eq!(secret["refreshToken"], "r");
+  }
+
+  #[tokio::test]
+  async fn tiktok_status_failure_after_the_upload_may_have_posted() {
+    // D-144: after the last chunk, a status read that fails keeps the handle and the item's
+    // keys; a later hop follows the same publish ID and never starts a second post
+    let (base, log) = fake(default_fake(vec![Value::Null])).await;
+    let dir = tempfile::tempdir().unwrap();
+    let (up, _) = setup(&base, dir.path(), later());
+    let p = run(&up, dir.path(), "v.mp4", &picked("SELF_ONLY"), None)
+      .await
+      .unwrap_or_else(|e| panic!("the upload may have posted: {}", e.message));
+    assert!(!p.verified);
+    assert_eq!(p.dest_item_id, "v_pub_file~v2.1");
+    assert!(p.note.unwrap().contains("Check TikTok"));
+    assert!(
+      up.handles.load("tt|1|src|1").unwrap().is_some(),
+      "the handle stays"
+    );
+    let again = run(&up, dir.path(), "v.mp4", &picked("SELF_ONLY"), None).await;
+    assert!(again.is_ok_and(|p| !p.verified));
+    assert_eq!(log.lock().unwrap().inits.len(), 1, "never a second post");
   }
 
   #[tokio::test]

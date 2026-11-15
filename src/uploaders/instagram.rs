@@ -598,6 +598,7 @@ mod tests {
       post: Some(&post),
       media: &media,
       idempotency_key: "ig|1784|src|1",
+      work_id: None,
       options: &options,
     };
     match control {
@@ -711,6 +712,7 @@ mod tests {
         post: None,
         media: &media,
         idempotency_key: "p",
+        work_id: None,
         options: &options,
       })
       .await

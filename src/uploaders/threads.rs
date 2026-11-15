@@ -464,6 +464,7 @@ mod tests {
         post: None,
         media: &[],
         idempotency_key: "threads|42|source|1",
+        work_id: None,
         options: &options,
       };
       let first = up.publish(upload()).await;
@@ -553,6 +554,7 @@ mod tests {
       post: None,
       media: &[],
       idempotency_key: "threads|42|source|1",
+      work_id: None,
       options: &options,
     };
     let result = up.publish(upload()).await.unwrap();
@@ -694,6 +696,7 @@ mod tests {
       post: None,
       media: &[],
       idempotency_key: "threads|42|source|2",
+      work_id: None,
       options,
     }
   }
@@ -774,6 +777,7 @@ mod tests {
         post: None,
         media: &media,
         idempotency_key: "a",
+        work_id: None,
         options: &options,
       })
       .await
@@ -795,6 +799,7 @@ mod tests {
         post: Some(&chain),
         media: &[],
         idempotency_key: "b",
+        work_id: None,
         options: &options,
       })
       .await

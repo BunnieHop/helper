@@ -57,6 +57,25 @@ async fn main() -> std::io::Result<()> {
   if !resumed.is_empty() {
     tracing::info!(count = resumed.len(), "resumed hops from the last run");
   }
+  {
+    // Videos backed up before same-file grouping existed join the same-video list from their
+    // sidecars (plan §1.3), once, while no hop is running. Nothing is hashed or downloaded.
+    let hub = hub.clone();
+    tokio::spawn(async move {
+      loop {
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        if hub.idle() {
+          break;
+        }
+      }
+      let h = hub.clone();
+      if let Ok(n) = tokio::task::spawn_blocking(move || h.backfill_seen()).await {
+        if n > 0 {
+          tracing::info!(count = n, "added earlier backups to the same-video list");
+        }
+      }
+    });
+  }
   let state = AppState {
     pairing: Arc::new(Pairing::open(paths.data_dir.join("pairings.json"))),
     origins: Arc::new(allowed_origins(dev)),

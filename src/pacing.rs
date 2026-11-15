@@ -67,6 +67,12 @@ impl Pace {
   fn day_start(&self, day: i64) -> i64 {
     day * DAY_MS - self.utc_offset_min * MIN_MS
   }
+
+  /// The creator's local day around `t`, as `[start, end)` unix ms.
+  pub fn day_of(&self, t: i64) -> (i64, i64) {
+    let day = self.local_day(t);
+    (self.day_start(day), self.day_start(day + 1))
+  }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -136,10 +142,19 @@ impl Ledger {
     self.lock().get(key).cloned()
   }
 
-  pub fn slot(&self, key: &str, pace: &Pace, now: i64) -> i64 {
+  /// `posted_today`: finished posts on this account today in the shared ledger (the browser's
+  /// included); the cap uses it when it is higher than this file's count.
+  pub fn slot(&self, key: &str, pace: &Pace, now: i64, posted_today: u32) -> i64 {
     let (a, b) = pace.jitter_ms;
     let jitter = if b > a { rand::random_range(a..=b) } else { a };
-    next_slot(pace, self.get(key).as_ref(), now, jitter)
+    let today = pace.local_day(now);
+    let mut u = self.get(key).unwrap_or_default();
+    if u.day != today {
+      u.day = today;
+      u.count = 0;
+    }
+    u.count = u.count.max(posted_today);
+    next_slot(pace, Some(&u), now, jitter)
   }
 
   /// A post attempt at `at`; `published` counts it toward today's cap.
@@ -280,7 +295,11 @@ mod tests {
     let again = Ledger::open(f);
     let u = again.get("bluesky:a").unwrap();
     assert_eq!((u.count, u.last), (1, T0 + 2 * H));
-    assert_eq!(again.slot("bluesky:a", &p, T0 + 3 * H), T0 + 24 * H);
+    assert_eq!(again.slot("bluesky:a", &p, T0 + 3 * H, 0), T0 + 24 * H);
+    // posts the shared ledger holds for today count when this file has none (the browser's)
+    let fresh = Ledger::open(dir.path().join("fresh.json"));
+    assert_eq!(fresh.slot("bluesky:a", &p, T0 + 3 * H, 1), T0 + 24 * H);
+    assert_eq!(fresh.slot("bluesky:a", &p, T0 + 3 * H, 0), T0 + 3 * H);
     // a new day resets the count
     again.record("bluesky:a", &p, T0 + 25 * H, true);
     assert_eq!(again.get("bluesky:a").unwrap().count, 1);

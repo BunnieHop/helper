@@ -659,6 +659,7 @@ mod tests {
       post: Some(&post),
       media: &media,
       idempotency_key: "fb|12|source|one",
+      work_id: None,
       options: &options,
     };
     let result = fb.publish(upload()).await.unwrap();
@@ -786,6 +787,7 @@ mod tests {
         post: None,
         media: &[],
         idempotency_key: "k",
+        work_id: None,
         options: &json!({}),
       })
       .await
@@ -838,6 +840,7 @@ mod tests {
         post: None,
         media: &[a, b],
         idempotency_key: "multi",
+        work_id: None,
         options: &json!({}),
       })
       .await
@@ -881,6 +884,7 @@ mod tests {
         post: None,
         media: &[p],
         idempotency_key: "denied",
+        work_id: None,
         options: &json!({}),
       })
       .await
@@ -934,6 +938,7 @@ mod tests {
         post: None,
         media: &[],
         idempotency_key: "fb|12|src|1",
+        work_id: None,
         options: &options,
       };
       let first = fb.publish(upload()).await;

@@ -6,7 +6,7 @@
 use super::atproto_oauth::{self as oauth, Body};
 use super::{
   alt_texts, body_text, created_at, file_body, is_image, is_video, json_or_fail, mime_of, net,
-  status_failure, thread, Endpoints,
+  partial_note, publish_answer, status_failure, thread, unknown_note, Endpoints, PublishAnswer,
 };
 use crate::hops::{BoxFut, Failure, Published, Upload, Uploader};
 use reqwest::Method;
@@ -174,18 +174,22 @@ impl Bluesky {
       .filter(|v| v.get("cid").is_some())
   }
 
-  /// Creates the post at `rkey`, or returns the one already there (D11).
+  /// Creates the post at `rkey`, or returns the one already there (D11). `Ok(Err(..))`: the
+  /// post may exist (D-069), so the hop keeps its keys and reports it unverified.
   async fn put_post(
     &self,
     s: &Session,
     rkey: &str,
     record: Value,
-  ) -> Result<(String, String), Failure> {
+  ) -> Result<Result<(String, String), Failure>, Failure> {
+    let pair = |v: &Value| {
+      (
+        v["uri"].as_str().unwrap_or("").to_string(),
+        v["cid"].as_str().unwrap_or("").to_string(),
+      )
+    };
     if let Some(v) = self.get_record(s, rkey).await {
-      return Ok((
-        v["uri"].as_str().unwrap_or("").into(),
-        v["cid"].as_str().unwrap_or("").into(),
-      ));
+      return Ok(Ok(pair(&v)));
     }
     let r = self
       .call(
@@ -196,11 +200,16 @@ impl Bluesky {
         Body::Json(json!({ "repo": s.did, "collection": "app.bsky.feed.post", "rkey": rkey, "record": record })),
       )
       .await;
-    let v = json_or_fail(P, Ok(r?)).await?;
-    Ok((
-      v["uri"].as_str().unwrap_or("").into(),
-      v["cid"].as_str().unwrap_or("").into(),
-    ))
+    match r {
+      // the request went out and its answer was lost
+      Err(e) if e.code == "networkLost" => Ok(Err(e)),
+      Err(e) => Err(e),
+      Ok(r) => match publish_answer(P, Ok(r)).await {
+        PublishAnswer::Posted(v) => Ok(Ok(pair(&v))),
+        PublishAnswer::Refused(e) => Err(e),
+        PublishAnswer::Unknown(e) => Ok(Err(e)),
+      },
+    }
   }
 
   async fn upload_image(&self, s: &Session, path: &std::path::Path) -> Result<Value, Failure> {
@@ -505,17 +514,47 @@ impl Uploader for Bluesky {
         }
         (!images.is_empty()).then(|| json!({ "$type": "app.bsky.embed.images", "images": images }))
       };
-      let (uri, cid) = self
+      let dest_url = Some(format!("https://bsky.app/profile/{}/post/{rkey}", s.handle));
+      let unverified = |dest_item_id: String, e: &Failure| Published {
+        note: Some(unknown_note(P, e, "posting")),
+        dest_item_id,
+        dest_url: dest_url.clone(),
+        verified: false,
+      };
+      let (uri, cid) = match self
         .put_post(&s, &rkey, record(&text, &created, embed, None, lang))
-        .await?;
+        .await?
+      {
+        Ok(p) => p,
+        Err(e) => {
+          let uri = format!("at://{}/app.bsky.feed.post/{rkey}", s.did);
+          return Ok(unverified(uri, &e));
+        }
+      };
       // F4 overflow thread: replies get their own fixed keys too.
       let (mut parent_uri, mut parent_cid) = (uri.clone(), cid.clone());
       for (n, t) in thread(u.post).iter().enumerate() {
         let k = tid_for(original.as_deref(), u.idempotency_key, n as u64 + 1);
         let reply = json!({ "root": { "uri": uri, "cid": cid }, "parent": { "uri": parent_uri, "cid": parent_cid } });
-        let (pu, pc) = self
+        // the root is live: a reply refused or unanswered leaves the post partial, never failed
+        let (pu, pc) = match self
           .put_post(&s, &k, record(t, &created, None, Some(reply), lang))
-          .await?;
+          .await
+        {
+          Ok(Ok(p)) => p,
+          Ok(Err(e)) | Err(e) => {
+            return Ok(Published {
+              note: Some(partial_note(
+                P,
+                &format!("part {} of the thread", n + 2),
+                &e,
+              )),
+              dest_item_id: uri.clone(),
+              dest_url: dest_url.clone(),
+              verified: false,
+            })
+          }
+        };
         parent_uri = pu;
         parent_cid = pc;
       }
@@ -523,7 +562,7 @@ impl Uploader for Bluesky {
       Ok(Published {
         note: None,
         dest_item_id: uri,
-        dest_url: Some(format!("https://bsky.app/profile/{}/post/{rkey}", s.handle)),
+        dest_url,
         verified,
       })
     })
@@ -556,6 +595,10 @@ mod tests {
     records: Mutex<HashMap<String, Value>>,
     creates: Mutex<u32>,
     videos: Mutex<u32>,
+    /// When set, createRecord answers with this status and posts nothing.
+    create_status: Mutex<Option<u16>>,
+    /// When set, createRecord refuses every reply with this status.
+    reply_status: Mutex<Option<u16>>,
   }
 
   fn app(pds: Arc<Pds>) -> Router {
@@ -593,10 +636,15 @@ mod tests {
       .route(
         "/xrpc/com.atproto.repo.createRecord",
         post(|State(p): State<Arc<Pds>>, Json(b): Json<Value>| async move {
+          let reply = b["record"].get("reply").is_some();
+          if let Some(c) = (*p.create_status.lock().unwrap()).or(if reply { *p.reply_status.lock().unwrap() } else { None }) {
+            let c = axum::http::StatusCode::from_u16(c).unwrap();
+            return (c, Json(json!({ "error": "Refused", "message": "nope" })));
+          }
           *p.creates.lock().unwrap() += 1;
           let k = b["rkey"].as_str().unwrap().to_string();
           p.records.lock().unwrap().insert(k.clone(), b["record"].clone());
-          Json(json!({ "uri": format!("at://did:plc:mara/app.bsky.feed.post/{k}"), "cid": "cid1" }))
+          (axum::http::StatusCode::OK, Json(json!({ "uri": format!("at://did:plc:mara/app.bsky.feed.post/{k}"), "cid": "cid1" })))
         }),
       )
       .with_state(pds)
@@ -627,6 +675,83 @@ mod tests {
   }
 
   #[tokio::test]
+  async fn bluesky_create_answers_follow_d069() {
+    let (b, pds, _d, media) = fixture().await;
+    let item = json!({ "id": "a", "title": "Hi", "publishedAt": "2021-06-01T12:00:00Z" });
+    for code in [400u16, 401, 422] {
+      *pds.create_status.lock().unwrap() = Some(code);
+      let r = b
+        .publish(Upload {
+          item: &item,
+          post: None,
+          media: std::slice::from_ref(&media),
+          idempotency_key: "hop:a:bluesky",
+          work_id: None,
+          options: &Value::Null,
+        })
+        .await;
+      assert!(r.is_err(), "{code} proves nothing was posted");
+    }
+    for code in [408u16, 409, 429, 500, 502] {
+      *pds.create_status.lock().unwrap() = Some(code);
+      let p = b
+        .publish(Upload {
+          item: &item,
+          post: None,
+          media: std::slice::from_ref(&media),
+          idempotency_key: "hop:a:bluesky",
+          work_id: None,
+          options: &Value::Null,
+        })
+        .await
+        .unwrap_or_else(|e| panic!("{code} may have posted, got {}", e.message));
+      assert!(!p.verified, "{code}");
+      let note = p.note.unwrap();
+      assert!(
+        note.contains("Check Bluesky") && !note.contains("refused"),
+        "{code}: {note}"
+      );
+      assert!(p
+        .dest_item_id
+        .starts_with("at://did:plc:mara/app.bsky.feed.post/"));
+    }
+  }
+
+  #[tokio::test]
+  async fn bluesky_never_fails_a_post_whose_root_is_live() {
+    // D-144: once the root exists, a refused or unanswered reply leaves the post partial
+    for code in [400u16, 401, 422, 502] {
+      let (b, pds, _d, media) = fixture().await;
+      *pds.reply_status.lock().unwrap() = Some(code);
+      let item = json!({ "id": "a", "title": "Hi", "publishedAt": "2021-06-01T12:00:00Z" });
+      let post = json!({ "fields": { "body": "Hi" }, "thread": ["part 2"] });
+      let p = b
+        .publish(Upload {
+          item: &item,
+          post: Some(&post),
+          media: std::slice::from_ref(&media),
+          idempotency_key: "hop:a:bluesky",
+          work_id: None,
+          options: &Value::Null,
+        })
+        .await
+        .unwrap_or_else(|e| panic!("{code}: the root is live, got {}", e.message));
+      assert_eq!(pds.records.lock().unwrap().len(), 1, "{code}");
+      assert!(!p.verified, "{code}");
+      assert!(p
+        .dest_item_id
+        .starts_with("at://did:plc:mara/app.bsky.feed.post/"));
+      let note = p.note.unwrap();
+      assert!(
+        note.contains("part 2 of the thread") && note.contains("Check Bluesky"),
+        "{note}"
+      );
+      // the failure names that part, never the post already live (N16)
+      assert!(!note.contains("the post ("), "{code}: {note}");
+    }
+  }
+
+  #[tokio::test]
   async fn bluesky_posts_video_with_the_original_date_and_never_twice() {
     let (b, pds, _d, media) = fixture().await;
     let item = json!({ "id": "a", "title": "Hi", "publishedAt": "2021-06-01T12:00:00-04:00", "width": 1080, "height": 1920 });
@@ -637,6 +762,7 @@ mod tests {
       post: Some(&post),
       media: std::slice::from_ref(&media),
       idempotency_key: "hop:a:bluesky",
+      work_id: None,
       options: &Value::Null,
     };
     let p = b.publish(up()).await.unwrap();

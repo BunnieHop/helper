@@ -482,6 +482,7 @@ mod tests {
       post: None,
       media: &media,
       idempotency_key: k,
+      work_id: None,
       options: &Value::Null,
     };
     let p = w.publish(up("h:s1:wordpress")).await.unwrap();

@@ -306,7 +306,8 @@ impl PeerTube {
       sent = end;
       match status {
         308 => continue,
-        200 | 201 => return r.json::<Value>().await.map_err(|e| net(P, e)),
+        // the video exists from here: an unreadable answer is reported, never failed (D-144)
+        200 | 201 => return Ok(r.json::<Value>().await.unwrap_or(Value::Null)),
         _ => {
           return Err(status_failure(
             P,
@@ -378,6 +379,17 @@ impl Uploader for PeerTube {
         .or(video["shortUUID"].as_str())
         .unwrap_or("")
         .to_string();
+      if uuid.is_empty() {
+        return Ok(Published {
+          note: Some(
+            "PeerTube took the video but didn't say where it is. Check PeerTube before posting again."
+              .into(),
+          ),
+          dest_item_id: String::new(),
+          dest_url: None,
+          verified: false,
+        });
+      }
       let short = video["shortUUID"].as_str().unwrap_or(&uuid).to_string();
       let check = self
         .send(|t| {
@@ -405,6 +417,7 @@ mod tests {
   use crate::uploaders::testkit::serve;
   use axum::extract::State;
   use axum::http::{HeaderMap, StatusCode};
+  use axum::response::IntoResponse;
   use axum::routing::{get, post, put};
   use axum::{Json, Router};
 
@@ -414,6 +427,8 @@ mod tests {
     meta: Mutex<Option<Value>>,
     uploads: Mutex<u32>,
     expire_once: Mutex<bool>,
+    /// The last chunk's 200 answer is not JSON.
+    garbled: Mutex<bool>,
   }
 
   fn app(i: Arc<Inst>) -> Router {
@@ -456,10 +471,13 @@ mod tests {
           let range = h["content-range"].to_str().unwrap().to_string();
           let total: usize = range.rsplit('/').next().unwrap().parse().unwrap();
           if i.bytes.lock().unwrap().len() < total {
-            (StatusCode::PERMANENT_REDIRECT, Json(json!({})))
+            (StatusCode::PERMANENT_REDIRECT, Json(json!({}))).into_response()
           } else {
             *i.uploads.lock().unwrap() += 1;
-            (StatusCode::OK, Json(json!({ "video": { "id": 1, "uuid": "u1", "shortUUID": "s1" } })))
+            if *i.garbled.lock().unwrap() {
+              return (StatusCode::OK, "<html>proxy</html>").into_response();
+            }
+            (StatusCode::OK, Json(json!({ "video": { "id": 1, "uuid": "u1", "shortUUID": "s1" } }))).into_response()
           }
         }),
       )
@@ -513,6 +531,7 @@ mod tests {
       post: None,
       media: std::slice::from_ref(&media),
       idempotency_key: "hop:a:peertube",
+      work_id: None,
       options: &Value::Null,
     };
     let p = pt.publish(up()).await.unwrap();
@@ -538,5 +557,39 @@ mod tests {
       1,
       "found on the channel → no second upload (D11)"
     );
+  }
+
+  #[tokio::test]
+  async fn peertube_never_fails_a_video_it_made() {
+    // D-144: the last chunk made the video; an answer BunnieHop can't read leaves it unverified
+    let i = Arc::new(Inst::default());
+    *i.garbled.lock().unwrap() = true;
+    let base = serve(app(i.clone())).await;
+    let http = reqwest::Client::new();
+    let acct = connect(&http, &base, "mara", "right").await.unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(
+      dir.path().join("c.json"),
+      Box::new(MemorySecrets::default()),
+    ));
+    store.set_secret("pt-1", &acct.secret).unwrap();
+    let pt = PeerTube::new(http, store, "pt-1".into(), acct.secret, Some("7".into())).unwrap();
+    let media = dir.path().join("media.mp4");
+    std::fs::write(&media, b"video").unwrap();
+    let item = json!({ "id": "a", "title": "My video" });
+    let p = pt
+      .publish(Upload {
+        item: &item,
+        post: None,
+        media: std::slice::from_ref(&media),
+        idempotency_key: "hop:a:peertube",
+        work_id: None,
+        options: &Value::Null,
+      })
+      .await
+      .unwrap_or_else(|e| panic!("the video exists: {}", e.message));
+    assert_eq!(*i.uploads.lock().unwrap(), 1);
+    assert!(!p.verified);
+    assert!(p.note.unwrap().contains("Check PeerTube"));
   }
 }

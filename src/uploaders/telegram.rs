@@ -376,6 +376,7 @@ mod tests {
         post: None,
         media: std::slice::from_ref(&v),
         idempotency_key: "h:v1:telegram",
+        work_id: None,
         options: &json!({}),
       })
       .await
@@ -389,6 +390,7 @@ mod tests {
         post: None,
         media: &[],
         idempotency_key: "h:t1:telegram",
+        work_id: None,
         options: &json!({}),
       })
       .await
@@ -430,6 +432,7 @@ mod tests {
         post: None,
         media: std::slice::from_ref(&v),
         idempotency_key: "k",
+        work_id: None,
         options: &json!({}),
       })
       .await

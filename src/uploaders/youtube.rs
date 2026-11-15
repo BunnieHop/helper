@@ -350,10 +350,16 @@ impl Uploader for YouTube {
         v["id"].as_str().unwrap_or("").to_string()
       };
       if id.is_empty() {
-        return Err(Failure::new(
-          "uploadRejected",
-          "YouTube didn't say which video it made.",
-        ));
+        // the upload finished, so the video may exist: reported, never failed (D-144)
+        return Ok(Published {
+          note: Some(
+            "YouTube took the video but didn't say which one it made. Check your channel before posting again."
+              .into(),
+          ),
+          dest_item_id: String::new(),
+          dest_url: None,
+          verified: false,
+        });
       }
       // D12: published only when YouTube says the video is public and processed
       let mut tries = 0;
@@ -434,6 +440,8 @@ mod tests {
     quota: Mutex<bool>,
     /// The `status` YouTube reports for the next upload (default: public and processed).
     next_status: Mutex<Option<Value>>,
+    /// The finished upload's answer names no video.
+    no_id: Mutex<bool>,
   }
   type S = Arc<Yt>;
 
@@ -512,6 +520,9 @@ mod tests {
           let n = s.videos.lock().unwrap().len() + 1;
           let v = json!({ "id": format!("vid{n}"), "snippet": meta["snippet"], "recordingDetails": meta["recordingDetails"], "status": status });
           s.videos.lock().unwrap().push(v.clone());
+          if *s.no_id.lock().unwrap() {
+            return (StatusCode::OK, Json(json!({})));
+          }
           (StatusCode::OK, Json(v))
         }),
       )
@@ -563,6 +574,7 @@ mod tests {
       post: Some(post),
       media: &media,
       idempotency_key: "k",
+      work_id: None,
       options: &opts,
     };
     let no_answer: &'static Value = Box::leak(Box::new(post_for(None)));
@@ -635,6 +647,7 @@ mod tests {
           post: Some(&post),
           media,
           idempotency_key: "k",
+          work_id: None,
           options: opts,
         })
         .await
@@ -671,6 +684,16 @@ mod tests {
     .await
     .unwrap();
     assert!(r.verified && r.note.is_none());
+    // D-144: a finished upload whose answer names no video may have made one
+    *s.no_id.lock().unwrap() = true;
+    let r = go(
+      "five",
+      json!({ "privacyStatus": "public", "uploadStatus": "processed" }),
+    )
+    .await
+    .unwrap_or_else(|e| panic!("the upload finished: {}", e.message));
+    assert!(!r.verified);
+    assert!(r.note.unwrap().contains("Check your channel"));
   }
 
   #[tokio::test]
@@ -697,6 +720,7 @@ mod tests {
         post: Some(&p),
         media: &media,
         idempotency_key: "k",
+        work_id: None,
         options: &json!({}),
       })
       .await

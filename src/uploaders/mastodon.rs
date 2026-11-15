@@ -3,7 +3,8 @@
 //! cell that already published is never sent again.
 
 use super::{
-  alt_texts, base_url, body_text, file_body, is_image, is_video, json_or_fail, mime_of, net, thread,
+  alt_texts, base_url, body_text, file_body, is_image, is_video, json_or_fail, mime_of, net,
+  partial_note, publish_answer, thread, unknown_note, PublishAnswer,
 };
 use crate::hops::{BoxFut, Failure, Published, Upload, Uploader};
 use reqwest::multipart::{Form, Part};
@@ -108,7 +109,7 @@ impl Mastodon {
     reply_to: Option<&str>,
     key: &str,
     lang: Option<&str>,
-  ) -> Result<Value, Failure> {
+  ) -> PublishAnswer {
     let mut b = json!({ "status": text, "visibility": "public", "media_ids": media });
     if let Some(r) = reply_to {
       b["in_reply_to_id"] = json!(r);
@@ -124,7 +125,8 @@ impl Mastodon {
       .json(&b)
       .send()
       .await;
-    json_or_fail(self.name, r).await
+    // the request that makes the post live, read under D-069
+    publish_answer(self.name, r).await
   }
 }
 
@@ -141,7 +143,13 @@ impl Uploader for Mastodon {
         }
       }
       let lang = u.item.get("language").and_then(Value::as_str);
-      let root = self
+      let unverified = |id: &str, url: Option<String>, e: &Failure| Published {
+        note: Some(unknown_note(self.name, e, "posting")),
+        dest_item_id: id.to_string(),
+        dest_url: url,
+        verified: false,
+      };
+      let root = match self
         .status(
           &body_text(u.post, u.item),
           &ids,
@@ -149,20 +157,33 @@ impl Uploader for Mastodon {
           u.idempotency_key,
           lang,
         )
-        .await?;
+        .await
+      {
+        PublishAnswer::Posted(v) => v,
+        PublishAnswer::Refused(e) => return Err(e),
+        PublishAnswer::Unknown(e) => return Ok(unverified("", None, &e)),
+      };
       let root_id = root["id"].as_str().unwrap_or("").to_string();
+      let root_url = root["url"].as_str().map(String::from);
       let mut parent = root_id.clone();
       for (n, t) in thread(u.post).iter().enumerate() {
-        let s = self
-          .status(
-            t,
-            &[],
-            Some(&parent),
-            &format!("{}:{}", u.idempotency_key, n + 1),
-            lang,
-          )
-          .await?;
-        parent = s["id"].as_str().unwrap_or("").to_string();
+        let key = format!("{}:{}", u.idempotency_key, n + 1);
+        match self.status(t, &[], Some(&parent), &key, lang).await {
+          PublishAnswer::Posted(s) => parent = s["id"].as_str().unwrap_or("").to_string(),
+          // the first status is live: a later part refused or unanswered leaves the post partial
+          PublishAnswer::Refused(e) | PublishAnswer::Unknown(e) => {
+            return Ok(Published {
+              note: Some(partial_note(
+                self.name,
+                &format!("part {} of the thread", n + 2),
+                &e,
+              )),
+              dest_item_id: root_id,
+              dest_url: root_url,
+              verified: false,
+            })
+          }
+        }
       }
       let check = self
         .http
@@ -328,6 +349,7 @@ mod tests {
       post: Some(&post),
       media: std::slice::from_ref(&media),
       idempotency_key: "hop:a:mastodon",
+      work_id: None,
       options: &Value::Null,
     };
     let p = m.publish(up()).await.unwrap();
@@ -346,6 +368,83 @@ mod tests {
       2,
       "same keys → no second status"
     );
+  }
+
+  #[tokio::test]
+  async fn mastodon_status_answers_follow_d069() {
+    // the answer to the request that makes the post live: only a refusal proves nothing posted
+    for (code, refused) in [
+      (400, true),
+      (401, true),
+      (422, true),
+      (408, false),
+      (409, false),
+      (429, false),
+      (500, false),
+      (502, false),
+    ] {
+      let app = Router::new().route(
+        "/api/v1/statuses",
+        post(move || async move {
+          (
+            axum::http::StatusCode::from_u16(code).unwrap(),
+            Json(json!({ "error": "no" })),
+          )
+        }),
+      );
+      let base = serve(app).await;
+      let m = Mastodon::new(
+        reqwest::Client::new(),
+        &json!({ "instance": base, "token": "tok" }),
+        "mastodon",
+      )
+      .unwrap();
+      let item = json!({ "id": "a", "title": "Hello" });
+      let r = m
+        .publish(Upload {
+          item: &item,
+          post: None,
+          media: &[],
+          idempotency_key: "k",
+          work_id: None,
+          options: &Value::Null,
+        })
+        .await;
+      match r {
+        Err(_) if refused => {}
+        Ok(p) if !refused => {
+          assert!(!p.verified, "{code}");
+          assert!(
+            p.note
+              .as_deref()
+              .is_some_and(|n| n.contains("Check Mastodon") && !n.contains("refused")),
+            "{code}: {:?}",
+            p.note
+          );
+        }
+        other => panic!("{code}: {:?}", other.map(|p| p.verified)),
+      }
+    }
+    // a lost answer may have posted too
+    let m = Mastodon::new(
+      reqwest::Client::new(),
+      &json!({ "instance": "http://127.0.0.1:9", "token": "tok" }),
+      "mastodon",
+    )
+    .unwrap();
+    let item = json!({ "id": "a", "title": "Hello" });
+    let p = m
+      .publish(Upload {
+        item: &item,
+        post: None,
+        media: &[],
+        idempotency_key: "k",
+        work_id: None,
+        options: &Value::Null,
+      })
+      .await
+      .expect("a lost answer is not a refusal");
+    assert!(!p.verified);
   }
 
   #[tokio::test]

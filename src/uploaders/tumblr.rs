@@ -635,6 +635,7 @@ mod tests {
       post: Some(&post),
       media: &media,
       idempotency_key: "tu|1|src|1",
+      work_id: None,
       options: &options,
     };
     match control {

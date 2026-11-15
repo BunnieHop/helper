@@ -1,6 +1,6 @@
 [package]
 name = "bunniehop-helper"
-version = "0.3.0"
+version = "0.4.0"
 description = "BunnieHop Helper: downloads and posts as you, on your computer."
 license = "AGPL-3.0-or-later"
 authors = ["BunnieHop contributors", "Jelle Glebbeek (youtube-dl-gui)"]
@@ -40,6 +40,10 @@ grammers-tl-types = { version = "=0.12.0", features = ["impl-serde"] }
 zip = { version = "8.1.0", default-features = false, features = ["deflate"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 p256 = { version = "0.14", default-features = false, features = ["ecdsa", "std"] }
+# NFKC and Unicode letter/number classes for the look-alike rule, matching JavaScript exactly
+# (already in the tree through url/idna)
+icu_normalizer = { version = "2", default-features = false, features = ["compiled_data"] }
+icu_properties = { version = "2", default-features = false, features = ["compiled_data"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.176"

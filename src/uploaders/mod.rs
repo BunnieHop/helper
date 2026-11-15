@@ -270,13 +270,37 @@ pub async fn publish_answer(
   match json_or_fail(platform, r).await {
     Ok(v) => PublishAnswer::Posted(v),
     Err(e) if nothing_posted(status) => PublishAnswer::Refused(e),
-    Err(e) => PublishAnswer::Unknown(e),
+    // 408 and 409 fall under "refused" in `status_failure`, but the post may exist
+    Err(mut e) => {
+      if let (Some(s), "uploadRejected") = (status, e.code) {
+        e.message = format!("{platform} didn't confirm the post ({s}).");
+      }
+      PublishAnswer::Unknown(e)
+    }
   }
 }
 
 /// The creator's note when a post may exist but was not confirmed.
 pub fn unknown_note(platform: &str, e: &Failure, again: &str) -> String {
   let mut note = format!("{} Check {platform} before {again} again.", e.message);
+  if let Some(v) = &e.verbatim {
+    note.push('\n');
+    note.push_str(v);
+  }
+  note
+}
+
+/// The creator's note when the post is live but a later part of it failed (D-144): an uploader
+/// never returns a refusal once a platform write succeeded.
+pub fn partial_note(platform: &str, missing: &str, e: &Failure) -> String {
+  // the failure is about that part, never the post already live
+  let why = e
+    .message
+    .replace("refused the post", "refused that part")
+    .replace("didn't confirm the post", "didn't confirm that part");
+  let mut note = format!(
+    "The post is on {platform}, but {missing} didn't go through: {why} Check {platform} before posting again."
+  );
   if let Some(v) = &e.verbatim {
     note.push('\n');
     note.push_str(v);

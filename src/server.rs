@@ -217,6 +217,15 @@ pub fn router(state: AppState) -> Router {
       "/v1/ledger/merge",
       post(merge_ledger).layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024)),
     )
+    .route("/v1/works", get(works_export))
+    .route(
+      "/v1/works/merge",
+      post(works_merge).layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024)),
+    )
+    .route("/v1/works/lookalikes", post(works_lookalikes))
+    .route("/v1/works/same", post(works_same))
+    .route("/v1/works/different", post(works_different))
+    .route("/v1/works/split", post(works_split))
     .route("/v1/open-folder", post(open_folder))
     .route("/v1/events", get(events))
     .merge(crate::connect::routes())
@@ -508,6 +517,9 @@ async fn capabilities(_t: PairedToken) -> impl IntoResponse {
     // GET /v1/ledger and POST /v1/ledger/merge exist, so the browser engine can copy this
     // Helper's posts and hand over its own (D-082); a Helper without it has neither
     "ledgerMerge": true,
+    // the /v1/works routes and the notSame cell action exist (same-file grouping, O-023/O-024);
+    // the browser never asks a Helper without it for them
+    "works": true,
   }))
 }
 
@@ -632,7 +644,7 @@ async fn list_catalog(
 fn failure(f: Failure) -> ApiError {
   let status = match f.code {
     "notFound404" => StatusCode::NOT_FOUND,
-    "duplicate" | "stopped" => StatusCode::CONFLICT,
+    "duplicate" | "stopped" | "workBusy" => StatusCode::CONFLICT,
     _ => StatusCode::BAD_REQUEST,
   };
   let e = ApiError::new(status, f.code, f.message);
@@ -734,11 +746,16 @@ async fn cell_action(
     String,
     String,
   )>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<axum::response::Response, ApiError> {
   match action.as_str() {
     "retry" => st.hub.retry(&id, &item, &dest),
     "skip" => st.hub.skip(&id, &item, &dest),
     "postAgain" => st.hub.post_again(&id, &item, &dest),
+    // "Not the same video" (plan §3): `{}`, or 409 `workBusy` while the item is posting
+    "notSame" => {
+      st.hub.not_same(&id, &item, &dest).map_err(failure)?;
+      return Ok(Json(serde_json::json!({})).into_response());
+    }
     _ => {
       return Err(ApiError::new(
         StatusCode::NOT_FOUND,
@@ -748,7 +765,7 @@ async fn cell_action(
     }
   }
   .map_err(failure)?;
-  Ok(StatusCode::NO_CONTENT)
+  Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 async fn stop_all(State(st): State<AppState>, _t: PairedToken) -> StatusCode {
@@ -778,6 +795,143 @@ async fn merge_ledger(
   Ok(Json(
     serde_json::json!({ "changed": st.hub.merge_ledger(&b.entries) }),
   ))
+}
+
+/// The Helper's same-video list (`WorksExport`), for the browser engine to merge. Item ids,
+/// titles, links, sizes and sha256 only; no media and no credentials.
+async fn works_export(State(st): State<AppState>, _t: PairedToken) -> Json<serde_json::Value> {
+  let doc: serde_json::Value =
+    serde_json::from_str(&st.hub.works().doc().serialize()).unwrap_or_default();
+  Json(serde_json::json!({ "doc": doc }))
+}
+
+fn works_body<T: serde::de::DeserializeOwned>(
+  body: Result<Json<T>, axum::extract::rejection::JsonRejection>,
+  ask: &'static str,
+) -> Result<T, ApiError> {
+  body
+    .map(|Json(b)| b)
+    .map_err(|e| ApiError::bad_request(ask).with_verbatim(e.body_text()))
+}
+
+#[derive(Deserialize)]
+struct WorksExportBody {
+  doc: serde_json::Value,
+}
+
+/// Another engine's copy, read as a union with this one (`WorksMergeResult`).
+async fn works_merge(
+  State(st): State<AppState>,
+  _t: PairedToken,
+  body: Result<Json<WorksExportBody>, axum::extract::rejection::JsonRejection>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+  let b = works_body(body, "Send the same-video list.")?;
+  let doc = crate::works::WorksDoc::parse(&b.doc.to_string())
+    .map_err(|e| ApiError::bad_request("That same-video list can't be read.").with_verbatim(e))?;
+  Ok(Json(
+    serde_json::json!({ "changed": st.hub.works().merge(&[doc]) }),
+  ))
+}
+
+#[derive(Deserialize)]
+struct LookAlikesBody {
+  items: Vec<serde_json::Value>,
+}
+
+/// Listed items that look like a video already posted (`LookAlikesResult`). Only a note: nothing
+/// groups until the creator taps "Same video".
+async fn works_lookalikes(
+  State(st): State<AppState>,
+  _t: PairedToken,
+  body: Result<Json<LookAlikesBody>, axum::extract::rejection::JsonRejection>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+  let b = works_body(body, "Send the listed items.")?;
+  if b.items.len() > 200 {
+    return Err(ApiError::bad_request("Send at most 200 items."));
+  }
+  let doc = st.hub.works().doc();
+  let pairs = crate::works::find_lookalikes(&doc, &b.items, |r| st.hub.posted_to(r));
+  Ok(Json(serde_json::json!({ "pairs": pairs })))
+}
+
+#[derive(Deserialize)]
+struct PairBody {
+  a: ItemRefBody,
+  b: ItemRefBody,
+}
+
+#[derive(Deserialize)]
+struct ItemRefBody {
+  platform: String,
+  id: String,
+}
+
+impl ItemRefBody {
+  fn into_ref(self) -> Result<crate::works::Ref, ApiError> {
+    if self.platform.is_empty() || self.id.is_empty() || self.platform.contains('|') {
+      return Err(ApiError::bad_request("Name a platform and an item."));
+    }
+    Ok(crate::works::Ref::new(self.platform, self.id))
+  }
+}
+
+/// "Same video" on a look-alike (`WorksSameResult`).
+async fn works_same(
+  State(st): State<AppState>,
+  _t: PairedToken,
+  body: Result<Json<PairBody>, axum::extract::rejection::JsonRejection>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+  let b = works_body(body, "Send the two videos.")?;
+  let (a, bb) = (b.a.into_ref()?, b.b.into_ref()?);
+  let id = st
+    .hub
+    .works()
+    .same(&a, &bb)
+    .ok_or_else(|| ApiError::internal("Couldn't save the same-video list."))?;
+  Ok(Json(serde_json::json!({ "workId": id })))
+}
+
+/// "Different" on a look-alike: never offered or grouped again.
+async fn works_different(
+  State(st): State<AppState>,
+  _t: PairedToken,
+  body: Result<Json<PairBody>, axum::extract::rejection::JsonRejection>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+  let b = works_body(body, "Send the two videos.")?;
+  let (a, bb) = (b.a.into_ref()?, b.b.into_ref()?);
+  st.hub.works().different(&a, &bb);
+  Ok(Json(serde_json::json!({})))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SplitBody {
+  work_id: String,
+  member: ItemRefBody,
+}
+
+/// Settings → Same videos → Split. 409 `workBusy` while that video is posting.
+async fn works_split(
+  State(st): State<AppState>,
+  _t: PairedToken,
+  body: Result<Json<SplitBody>, axum::extract::rejection::JsonRejection>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+  let b = works_body(body, "Send the group and the video.")?;
+  let member = b.member.into_ref()?;
+  if st
+    .hub
+    .works()
+    .work_of(&member)
+    .is_some_and(|w| w.id != b.work_id)
+  {
+    return Err(ApiError::new(
+      StatusCode::NOT_FOUND,
+      "notFound404",
+      "That video isn't in that group.",
+    ));
+  }
+  st.hub.split_member(&member).map_err(failure)?;
+  Ok(Json(serde_json::json!({})))
 }
 
 #[derive(Deserialize)]
@@ -1430,6 +1584,179 @@ esac
     .await;
     assert_eq!(s, StatusCode::FORBIDDEN);
     assert!(f.hub.ledger().is_empty(), "nothing merged without pairing");
+  }
+
+  #[tokio::test]
+  async fn works_routes_require_pairing() {
+    let f = fx();
+    let pair = json!({ "a": { "platform": "youtube", "id": "a" }, "b": { "platform": "tiktok", "id": "b" } });
+    for (m, path, body) in [
+      ("GET", "/v1/works", None),
+      ("POST", "/v1/works/same", Some(pair.clone())),
+      ("POST", "/v1/works/different", Some(pair.clone())),
+      ("POST", "/v1/works/lookalikes", Some(json!({ "items": [] }))),
+      (
+        "POST",
+        "/v1/works/split",
+        Some(json!({ "workId": "w", "member": { "platform": "youtube", "id": "a" } })),
+      ),
+      (
+        "POST",
+        "/v1/works/merge",
+        Some(json!({ "doc": { "format": "bunniehop.works", "version": 1 } })),
+      ),
+      ("POST", "/v1/hops/h/items/a/bluesky/notSame", None),
+    ] {
+      let (s, _, _) = send(&f.app, req(m, path, Some(PROD_ORIGIN), None, body)).await;
+      assert_eq!(s, StatusCode::UNAUTHORIZED, "{path}");
+    }
+    let t = paired(&f).await;
+    let (s, _, _) = send(
+      &f.app,
+      req(
+        "POST",
+        "/v1/works/same",
+        Some("https://evil.example"),
+        Some(&t),
+        Some(pair),
+      ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    assert!(
+      f.hub.works().doc().works.is_empty(),
+      "nothing grouped without pairing"
+    );
+  }
+
+  #[tokio::test]
+  async fn works_routes_list_confirm_and_split() {
+    let f = fx();
+    let t = paired(&f).await;
+    let (s, _, b) = send(
+      &f.app,
+      req("GET", "/v1/capabilities", Some(PROD_ORIGIN), Some(&t), None),
+    )
+    .await;
+    assert_eq!((s, b["works"].clone()), (StatusCode::OK, json!(true)));
+    let pair = json!({ "a": { "platform": "youtube", "id": "a" }, "b": { "platform": "tiktok", "id": "b" } });
+    let (s, _, b) = send(
+      &f.app,
+      req(
+        "POST",
+        "/v1/works/same",
+        Some(PROD_ORIGIN),
+        Some(&t),
+        Some(pair),
+      ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+    let wid = b["workId"].as_str().unwrap().to_string();
+    let (s, _, b) = send(
+      &f.app,
+      req("GET", "/v1/works", Some(PROD_ORIGIN), Some(&t), None),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(b["doc"]["format"], "bunniehop.works");
+    assert_eq!(b["doc"]["works"][0]["id"], wid.as_str());
+    assert_eq!(b["doc"]["works"][0]["members"].as_array().unwrap().len(), 2);
+    // the same document comes back unchanged
+    let (s, _, m) = send(
+      &f.app,
+      req(
+        "POST",
+        "/v1/works/merge",
+        Some(PROD_ORIGIN),
+        Some(&t),
+        Some(json!({ "doc": b["doc"] })),
+      ),
+    )
+    .await;
+    assert_eq!((s, m["changed"].clone()), (StatusCode::OK, json!(false)));
+    let (s, _, _) = send(
+      &f.app,
+      req(
+        "POST",
+        "/v1/works/merge",
+        Some(PROD_ORIGIN),
+        Some(&t),
+        Some(json!({ "doc": { "format": "nope" } })),
+      ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _, b) = send(
+      &f.app,
+      req(
+        "POST",
+        "/v1/works/lookalikes",
+        Some(PROD_ORIGIN),
+        Some(&t),
+        Some(json!({ "items": [] })),
+      ),
+    )
+    .await;
+    assert_eq!((s, b["pairs"].clone()), (StatusCode::OK, json!([])));
+    // a split while the video is posting is refused with workBusy
+    let want = f.hub.works().aliases(
+      &crate::works::Ref::new("tiktok", "b"),
+      "bluesky",
+      "acct",
+      None,
+    );
+    let (seen, slot) = f
+      .hub
+      .posted_for_test()
+      .reserve_any(&want, "2026-11-12T10:00:00Z");
+    assert!(matches!(seen, crate::posted::Seen::Clear));
+    let split = json!({ "workId": wid, "member": { "platform": "tiktok", "id": "b" } });
+    let (s, _, b) = send(
+      &f.app,
+      req(
+        "POST",
+        "/v1/works/split",
+        Some(PROD_ORIGIN),
+        Some(&t),
+        Some(split.clone()),
+      ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    assert_eq!(b["code"], "workBusy");
+    assert_eq!(b["message"], crate::works::WORK_BUSY_MESSAGE);
+    f.hub.posted_for_test().finish_slot(&slot, None);
+    let (s, _, b) = send(
+      &f.app,
+      req(
+        "POST",
+        "/v1/works/split",
+        Some(PROD_ORIGIN),
+        Some(&t),
+        Some(split),
+      ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+    assert!(f
+      .hub
+      .works()
+      .work_of(&crate::works::Ref::new("tiktok", "b"))
+      .is_none());
+    // "Not the same video" on a hop this Helper doesn't have
+    let (s, _, _) = send(
+      &f.app,
+      req(
+        "POST",
+        "/v1/hops/nope/items/a/bluesky/notSame",
+        Some(PROD_ORIGIN),
+        Some(&t),
+        None,
+      ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
   }
 
   #[tokio::test]

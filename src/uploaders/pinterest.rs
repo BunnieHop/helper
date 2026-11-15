@@ -693,6 +693,7 @@ mod tests {
       post: Some(&post),
       media: &media,
       idempotency_key: "pin|1|src|1",
+      work_id: None,
       options: &options,
     };
     match control {
@@ -856,6 +857,7 @@ mod tests {
           post: None,
           media: &media,
           idempotency_key: "m",
+          work_id: None,
           options: &options,
         })
         .await
